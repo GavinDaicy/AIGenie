@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.genie.query.infrastructure.dao.mysql.mapper.ChatSessionMapper">
+
+    <insert id="insert" parameterType="com.genie.query.domain.chat.model.ChatSession">
+        insert into chat_session (id, title, knowledge_codes, create_time, update_time)
+        values (#{id}, #{title}, #{knowledgeCodes}, #{createTime}, #{updateTime})
+    </insert>
+
+    <select id="findById" resultType="com.genie.query.domain.chat.model.ChatSession">
+        select * from chat_session where id = #{id}
+    </select>
+
+    <select id="listOrderByUpdateTimeDesc" resultType="com.genie.query.domain.chat.model.ChatSession">
+        select * from chat_session
+        order by update_time desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <update id="updateTitle">
+        update chat_session set title = #{title}, update_time = now() where id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        delete from chat_session where id = #{id}
+    </delete>
+</mapper>

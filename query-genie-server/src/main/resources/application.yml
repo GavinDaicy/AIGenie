@@ -1,0 +1,170 @@
+# 应用基本信息
+app:
+  search:
+    embedding-cache:
+      enabled: true       # 查询向量短 TTL 缓存，减少同问句重复 embedding
+      ttl-ms: 15000       # 缓存有效期（毫秒）
+  # 分块策略（递归切块）：块大小与重叠，影响召回与上下文连贯性
+  chunk:
+    size: 500           # 目标块大小（字符数）
+    max-size: 1000       # 单块最大长度
+    overlap: 100         # 块间重叠字符数，减少边界断句
+  rerank:
+    enabled: true          # 全局是否允许 rerank
+    model: gte-rerank-v2    # DashScope 文本排序模型
+    candidate-factor: 2     # 初检条数 = size * factor，再 rerank 到 size；1 表示不放大
+    # api-key:              # 可选，不填则使用 spring.ai.dashscope.api-key
+  # 智能问答（RAG）
+  qa:
+    enabled: true           # 是否启用智能问答
+    size: 10                # 用于上下文的检索条数
+    rerank: true            # 是否对检索结果做 rerank
+    max-context-chars: 6000  # 上下文最大字符数，避免超出模型窗口
+    max-history-turns: 10    # 多轮时参与上下文的历史轮数上限
+    summarize-when-turns-over: 6   # 超过该轮数时对更早历史做总结
+    max-total-history-chars: 0     # 历史总字符数上限，0 表示不按字符数限制
+    # 检索放大控制（Query Rewrite + HYBRID）
+    search:
+      max-es-queries-per-ask: 8        # 单次问答允许的 ES 请求预算（HYBRID 记 2，KEYWORD/VECTOR 记 1）
+      short-query-char-threshold: 8    # 短 query 判定阈值（去空白后字符数 <= 该值）
+      short-query-keyword-first: true  # HYBRID 下短 query 先走 KEYWORD，再按命中情况决定是否升级 HYBRID
+      keyword-upgrade-top1-threshold: 7.0  # 短 query 的 keyword top1 低于该分值时，触发升级 HYBRID（分值基于当前归一化口径）
+      keyword-upgrade-min-hits: 2      # 短 query 的 keyword 命中数低于该阈值时，触发升级 HYBRID
+      rerank-uncertainty-gap-threshold: 0.6  # top1-topk 分差小于等于该值时视为“胶着”，触发 rerank
+      rerank-gap-compare-k: 5               # 与 top1 比较分差的第 k 名（k 越大越严格）
+      rerank-long-query-char-threshold: 32  # query 去空白后长度达到该值时直接触发 rerank
+      rerank-prefilter-score-threshold: 4.0 # rerank 前候选分数下限（低于该值不进入 rerank）
+      rerank-prefilter-max-chunks-per-doc: 2 # rerank 前每个文档最多保留的 chunk 数
+    sessions:
+      list-limit: 100              # 会话列表单页最大条数
+
+  # Query 改写与多查询生成
+  query-rewrite:
+    enabled: true                  # 是否默认启用 Query 改写
+    default-total-queries: 4       # 默认生成的查询总数（1 个主要 + 3 个扩展）
+    max-total-queries: 8           # 允许的最大查询总数
+    openai:
+      # OpenAI 供应商相关配置（按需填写或通过环境变量注入）
+      api-key: ${OPENAI_API_KEY:}
+      base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      model: ${OPENAI_MODEL:qwen2.5-7b-instruct-1m}
+      temperature: ${OPENAI_TEMPERATURE:0.3}
+      timeout-ms: ${OPENAI_TIMEOUT_MS:10000}
+
+spring:
+  config:
+    # 同时兼容在 query-genie-server 目录和仓库根目录启动
+    import: optional:file:.env[.properties],optional:file:../.env[.properties]
+  application:
+    name: genie-query-server
+  # Spring AI Alibaba - DashScope Embedding（使用阿里 text-embedding-v4）
+  ai:
+    model:
+      embedding: dashscope   # 启用 DashScope 作为 Embedding 实现
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:}   # 必填，建议通过环境变量注入
+      embedding:
+        options:
+          model: text-embedding-v4    # 阿里 embedding-v4 模型
+          dimensions: 768            # v4 支持 64~2048，默认 1024，需与 ES dense_vector 维度一致
+      # 智能问答使用的对话模型（与 Embedding 共用 api-key）
+      chat:
+        options:
+          model: qwen-turbo   # 可选 qwen-plus、qwen-max 等
+          temperature: 0.7
+          max-tokens: 2000
+  # 服务器配置
+  main:
+    allow-bean-definition-overriding: true  # 允许Bean覆盖
+    banner-mode: console  # 控制台显示启动banner
+  # 文件上传配置
+  servlet:
+    multipart:
+      max-file-size: 50MB      # 单个文件最大大小
+      max-request-size: 100MB  # 整个请求最大大小
+      enabled: true
+      location: /tmp           # 临时目录
+  # 数据库连接池
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:genie}?rewriteBatchedStatements=true&useUnicode=true&amp&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowMultiQueries=true&zeroDateTimeBehavior=CONVERT_TO_NULL&sessionVariables=group_concat_max_len=204800
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
+    driverClassName: com.mysql.cj.jdbc.Driver
+    type: com.alibaba.druid.pool.DruidDataSource
+    #配置初始化大小/最小/最大
+    initial-size: 5
+    min-idle: 10
+    max-active: 500
+  # Redis 基础配置
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:123456}
+      database: 0
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+          max-wait: -1ms
+
+# 服务器配置
+server:
+  port: 8090  # 端口号
+  servlet:
+    context-path: /genie/api  # 接口统一前缀/上下文路径
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+  tomcat:
+    uri-encoding: UTF-8
+    max-threads: 200  # 最大线程数
+    min-spare-threads: 10  # 最小空闲线程数
+    connection-timeout: 5000ms  # 连接超时时间
+    max-connections: 10000  # 最大连接数
+  compression:
+    enabled: true  # 启用响应压缩
+    mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/json,application/javascript
+    min-response-size: 1024  # 最小压缩大小
+
+# Redisson 配置
+redisson:
+  # 单节点配置
+  single-server-config:
+    address: "redis://${spring.data.redis.host}:${spring.data.redis.port}"
+    password: ${spring.data.redis.password}
+    database: ${spring.data.redis.database}
+    connection-pool-size: ${spring.data.redis.lettuce.pool.max-active}
+    connection-minimum-idle-size: ${spring.data.redis.lettuce.pool.min-idle}
+    subscription-connection-pool-size: 50
+    client-name: ${spring.application.name}
+
+# 跨域配置
+cors:
+  allowed-origins: "*"  # 允许的源，生产环境建议具体指定
+  allowed-methods: GET,POST,PUT,DELETE,OPTIONS
+  allowed-headers: "*"
+  allow-credentials: true
+  max-age: 3600
+
+
+# 日志配置，方便调试
+logging:
+  level:
+    "[com.genie.query.infrastructure.dao.mysql.mapper]": debug
+    "[org.apache.ibatis]": debug  # MyBatis 框架日志
+    "[org.mybatis.spring]": debug  # MyBatis-Spring 集成日志
+
+mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-handlers-package: com.genie.query.infrastructure.handle.typehandle  # 注册类型处理器包
+  configuration:
+    map-underscore-to-camel-case: true
+    # 或者使用 SLF4J 日志
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+elasticsearch:
+  host: ${ELASTICSEARCH_HOST:http://localhost:9200}  # 如果ES运行在本机默认端口

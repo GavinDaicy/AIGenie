@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.genie.query.infrastructure.dao.mysql.mapper.DocumentMapper" >
+    <select id="getAllDocumentList" resultType="com.genie.query.domain.document.model.Document">
+        select * from document
+    </select>
+    <select id="getDocumentListByKlCode" resultType="com.genie.query.domain.document.model.Document">
+        select d.* from document d
+        where d.knowledge_code = #{knowledgeCode}
+    </select>
+    <select id="getDocumentById" resultType="com.genie.query.domain.document.model.Document">
+        select * from document where id = #{documentId}
+    </select>
+    <select id="getDocumentByName" resultType="com.genie.query.domain.document.model.Document">
+        select * from document where name = #{name} limit 1
+    </select>
+
+    <insert id="addDocument" parameterType="com.genie.query.domain.document.model.Document">
+        insert into document
+        (id, name, origin_uri, description,
+        status, type, category, knowledge_code,
+        object_store_path_origin, object_store_path_parsed,
+        create_time, update_time)
+        values (#{id}, #{name}, #{originUri}, #{description},
+        #{status}, #{type}, #{category}, #{knowledgeCode},
+        #{objectStorePathOrigin}, #{objectStorePathParsed},
+        #{createTime}, #{updateTime})
+    </insert>
+
+    <update id="updateDocument" parameterType="com.genie.query.domain.document.model.Document">
+        update document
+        set name = #{name},
+        description = #{description},
+        status = #{status},
+        update_time = #{updateTime}
+        where id = #{id}
+    </update>
+
+    <delete id="deleteDocument">
+        delete from document where id = #{documentId}
+    </delete>
+
+    <delete id="deleteByKnowledgeCode">
+        delete from document where knowledge_code = #{knowledgeCode}
+    </delete>
+</mapper>

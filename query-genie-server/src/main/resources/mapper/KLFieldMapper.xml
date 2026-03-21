@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.genie.query.infrastructure.dao.mysql.mapper.KLFieldMapper" >
+
+    <select id="getKLFieldList" parameterType="map" resultType="com.genie.query.domain.knowledge.model.KLField">
+        select * from kl_field where knowledge_id in
+        <foreach item="item" collection="knowledgeIdList" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+    <insert id="addKLFieldList" parameterType="com.genie.query.domain.knowledge.model.KLField">
+        insert into kl_field (id, knowledge_id, field_key, name, description, type, matchable, full_text_searchable, semantic_searchable, sortable, ord, boost)
+        values
+        <foreach item="item" collection="list" separator=",">
+            (#{item.id}, #{item.knowledgeId}, #{item.fieldKey}, #{item.name}, #{item.description}, #{item.type},
+            #{item.matchable}, #{item.fullTextSearchable}, #{item.semanticSearchable}, #{item.sortable}, #{item.ord}, #{item.boost})
+        </foreach>
+    </insert>
+
+    <delete id="deleteKLFieldList">
+        delete from kl_field where knowledge_id in
+        <foreach item="item" collection="list" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </delete>
+</mapper>

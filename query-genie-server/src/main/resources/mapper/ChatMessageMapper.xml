@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.genie.query.infrastructure.dao.mysql.mapper.ChatMessageMapper">
+
+    <insert id="insert" parameterType="com.genie.query.domain.chat.model.ChatMessage">
+        insert into chat_message (id, session_id, role, content, sources, sort_order, create_time)
+        values (#{id}, #{sessionId}, #{role}, #{content}, #{sources}, #{sortOrder}, #{createTime})
+    </insert>
+
+    <select id="listBySessionIdOrderBySortOrder" resultType="com.genie.query.domain.chat.model.ChatMessage">
+        select * from chat_message
+        where session_id = #{sessionId}
+        order by sort_order asc
+        limit #{limit}
+    </select>
+
+    <select id="countBySessionId" resultType="int">
+        select count(*) from chat_message where session_id = #{sessionId}
+    </select>
+
+    <delete id="deleteBySessionId">
+        delete from chat_message where session_id = #{sessionId}
+    </delete>
+</mapper>
