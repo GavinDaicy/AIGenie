@@ -55,6 +55,7 @@
             name,
             description,
             status,
+            enabled,
             create_time,
             update_time,
             chunking_strategy,

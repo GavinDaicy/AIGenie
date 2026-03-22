@@ -5,6 +5,7 @@ import com.genie.query.domain.document.model.Document;
 import com.genie.query.domain.document.service.DocumentService;
 import com.genie.query.domain.etlpipeline.embedding.EmbeddingService;
 import com.genie.query.domain.exception.BusinessException;
+import com.genie.query.domain.knowledge.model.KLState;
 import com.genie.query.domain.knowledge.model.Knowledge;
 import com.genie.query.domain.knowledge.model.TimeDecayConfig;
 import com.genie.query.domain.knowledge.model.TimeDecayFieldSource;
@@ -65,7 +66,7 @@ public class QueryService {
      * @param queryText      查询关键词/问句（已校验非空）
      * @param requestedMode  请求的检索方式
      * @param size           每个知识库返回条数上限
-     * @param knowledgeCodes 指定知识库编码，为空则检索所有具备字段配置的知识库
+     * @param knowledgeCodes 指定知识库编码，为空则检索所有已发布且具备字段配置的知识库
      * @return 检索结果列表（领域模型），可为空
      */
     public List<QueryResultEntry> search(String queryText, SearchMode requestedMode, int size,
@@ -183,7 +184,7 @@ public class QueryService {
      * @param queryText     查询关键词/问句（已校验非空）
      * @param requestedMode 请求的检索方式
      * @param size          返回条数上限
-     * @param knowledgeCodes 指定知识库编码，为空则检索所有具备字段配置的知识库
+     * @param knowledgeCodes 指定知识库编码，为空则检索所有已发布且具备字段配置的知识库
      * @return 可直接用于 VectorStore.search 的参数
      */
     public VectorSearchParam prepareSearchParam(String queryText, SearchMode requestedMode, int size,
@@ -415,13 +416,14 @@ public class QueryService {
     }
 
     /**
-     * 解析要参与检索的知识库列表：未指定则返回所有具备字段配置的知识库；指定则校验存在并过滤出有字段配置的。
+     * 解析要参与检索的知识库列表：未指定则返回所有已发布且具备字段配置的知识库；指定则校验存在、已发布并过滤出有字段配置的。
      */
     public List<Knowledge> resolveKnowledgeListForSearch(List<String> knowledgeCodes) {
         List<Knowledge> all = knowledgeService.queryKnowledgeList();
         List<Knowledge> withFields = all.stream()
                 .filter(k -> k.getFields() != null && !k.getFields().isEmpty())
                 .filter(QueryService::isRetrievalEnabled)
+                .filter(QueryService::isPublishedForRetrieval)
                 .collect(Collectors.toList());
 
         if (knowledgeCodes == null || knowledgeCodes.isEmpty()) {
@@ -444,11 +446,26 @@ public class QueryService {
             if (!isRetrievalEnabled(k)) {
                 throw new BusinessException("知识库已禁用，无法参与检索: " + code);
             }
+            if (!isPublishedForRetrieval(k)) {
+                throw new BusinessException("知识库未发布，无法参与检索: " + code);
+            }
             if (k.getFields() != null && !k.getFields().isEmpty()) {
                 selected.add(k);
             }
         }
         return selected;
+    }
+
+    /** 仅已发布或发布后修改中的知识库可对外检索；状态为空视为未发布（不对外）。 */
+    private static boolean isPublishedForRetrieval(Knowledge k) {
+        if (k == null) {
+            return false;
+        }
+        KLState status = k.getStatus();
+        if (status == null) {
+            return false;
+        }
+        return status == KLState.PUBLISHED || status == KLState.PUBLISHED_MODIFYING;
     }
 
     /** null 或未显式关闭时视为可检索（兼容旧数据与默认启用） */

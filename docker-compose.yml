@@ -34,7 +34,10 @@ services:
       retries: 10
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.18.0
+    build:
+      context: ./docker/elasticsearch-ik
+      dockerfile: Dockerfile
+    image: query-genie-elasticsearch:8.18.0-ik
     container_name: genie-es
     restart: unless-stopped
     environment:

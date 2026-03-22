@@ -11,7 +11,8 @@ MYSQL_PASSWORD="${MYSQL_PASSWORD:-123456}"
 MYSQL_DATABASE="${MYSQL_DATABASE:-genie}"
 
 echo "[1/3] Starting dependencies with docker compose..."
-docker compose -f "${ROOT_DIR}/docker-compose.yml" up -d
+echo "    (Elasticsearch image includes IK analysis plugin; first run may build the image.)"
+docker compose -f "${ROOT_DIR}/docker-compose.yml" up -d --build
 
 echo "[2/3] Waiting for MySQL to be ready..."
 for _ in $(seq 1 60); do
