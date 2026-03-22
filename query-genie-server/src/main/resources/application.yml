@@ -168,3 +168,8 @@ mybatis:
 
 elasticsearch:
   host: ${ELASTICSEARCH_HOST:http://localhost:9200}  # 如果ES运行在本机默认端口
+
+# 语雀 Open API（文档链接解析等），X-Auth-Token；建议仅通过环境变量注入
+yuque:
+  auth:
+    token: ${YUQUE_AUTH_TOKEN:}

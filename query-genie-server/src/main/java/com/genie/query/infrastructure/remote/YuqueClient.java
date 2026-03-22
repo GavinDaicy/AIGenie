@@ -21,7 +21,7 @@ public class YuqueClient {
     @Autowired
     private OkHttpClient okHttpClient;
 
-    @Value("${yuque.auth.token:FKNOhj8rl64jyzUgjOZmtV6DZQ3RdAk84FxD4B5Y}")
+    @Value("${yuque.auth.token:}")
     private String authToken;
 
 //    public static void main(String[] args) {
@@ -41,9 +41,7 @@ public class YuqueClient {
                 .newBuilder()
                 .build();
 
-        if (authToken == null) {
-            authToken = "FKNOhj8rl64jyzUgjOZmtV6DZQ3RdAk84FxD4B5Y";
-        }
+        requireAuthToken();
 
         // 构建请求
         Request request = new Request.Builder()
@@ -88,6 +86,8 @@ public class YuqueClient {
                 .addQueryParameter("format", "markdown")
                 .build();
 
+        requireAuthToken();
+
         Request request = new Request.Builder()
                 .url(url)
                 .header("X-Auth-Token", authToken)
@@ -110,6 +110,13 @@ public class YuqueClient {
             return null;
         } catch (IOException e) {
             throw new RuntimeException("请求语雀API失败: " + e.getMessage(), e);
+        }
+    }
+
+    private void requireAuthToken() {
+        if (authToken == null || authToken.isBlank()) {
+            throw new IllegalStateException(
+                    "未配置语雀 API Token：请设置配置项 yuque.auth.token 或环境变量 YUQUE_AUTH_TOKEN");
         }
     }
 }

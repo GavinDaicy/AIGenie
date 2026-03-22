@@ -143,3 +143,7 @@ mybatis:
 
 elasticsearch:
   host: ${ELASTICSEARCH_HOST:http://localhost:9200}
+
+yuque:
+  auth:
+    token: ${YUQUE_AUTH_TOKEN:}
