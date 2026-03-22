@@ -61,6 +61,9 @@ public class KnowledgeService {
             td.setEnabled(false);
             knowledge.setTimeDecayConfig(td);
         }
+        if (knowledge.getEnabled() == null) {
+            knowledge.setEnabled(true);
+        }
         lockManager.withLock(LockKeys.KNOWLEDGE_INFO_KEY, () -> {
             // 查询是否已存在相同编码，相同名称的知识库
             queryRepeatKnowledge(knowledge);
@@ -141,11 +144,14 @@ public class KnowledgeService {
                 knowledge.setChunkingPolicy(defaultChunkingPolicy());
             }
         }
-        // 更新时间衰减配置：若未传则保持已有；若显式传入则校验
-        if (knowledge.getTimeDecayConfig() == null) {
+        // 更新时间衰减 / 启用标志：若未传则保持已有（一次查询）
+        if (knowledge.getTimeDecayConfig() == null || knowledge.getEnabled() == null) {
             Knowledge exist = knowledgeDAO.getKnowledgeByCode(knowledge.getCode());
-            if (exist != null) {
+            if (knowledge.getTimeDecayConfig() == null && exist != null) {
                 knowledge.setTimeDecayConfig(exist.getTimeDecayConfig());
+            }
+            if (knowledge.getEnabled() == null) {
+                knowledge.setEnabled(exist != null && exist.getEnabled() != null ? exist.getEnabled() : true);
             }
         }
 

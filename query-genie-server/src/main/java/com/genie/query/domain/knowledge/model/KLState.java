@@ -1,8 +1,8 @@
 package com.genie.query.domain.knowledge.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 import lombok.Getter;
-import lombok.Setter;
 
 /**
  * TODO
@@ -30,8 +30,11 @@ public enum KLState {
         return value;
     }
 
-    // 添加fromValue方法用于反序列化
+    @JsonCreator
     public static KLState fromValue(Integer value) {
+        if (value == null) {
+            return null;
+        }
         for (KLState state : KLState.values()) {
             if (state.value.equals(value)) {
                 return state;

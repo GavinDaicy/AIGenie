@@ -9,6 +9,7 @@
         <result property="name" column="name"/>
         <result property="description" column="description"/>
         <result property="status" column="status"/>
+        <result property="enabled" column="enabled"/>
         <result property="createTime" column="create_time"/>
         <result property="updateTime" column="update_time"/>
         <result property="primaryContentFieldKey" column="primary_content_field_key"/>
@@ -81,6 +82,7 @@
             #{name},
             #{description},
             #{status},
+            #{enabled},
             #{createTime},
             #{updateTime},
             #{chunkingPolicy.strategy},
@@ -108,6 +110,7 @@
         set name = #{name},
             description = #{description},
             status = #{status},
+            enabled = #{enabled},
             update_time = #{updateTime},
             chunking_strategy = #{chunkingPolicy.strategy},
             primary_content_field_key = #{primaryContentFieldKey},

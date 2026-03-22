@@ -421,6 +421,7 @@ public class QueryService {
         List<Knowledge> all = knowledgeService.queryKnowledgeList();
         List<Knowledge> withFields = all.stream()
                 .filter(k -> k.getFields() != null && !k.getFields().isEmpty())
+                .filter(QueryService::isRetrievalEnabled)
                 .collect(Collectors.toList());
 
         if (knowledgeCodes == null || knowledgeCodes.isEmpty()) {
@@ -440,11 +441,19 @@ public class QueryService {
             if (k == null) {
                 throw new BusinessException("知识库不存在: " + code);
             }
+            if (!isRetrievalEnabled(k)) {
+                throw new BusinessException("知识库已禁用，无法参与检索: " + code);
+            }
             if (k.getFields() != null && !k.getFields().isEmpty()) {
                 selected.add(k);
             }
         }
         return selected;
+    }
+
+    /** null 或未显式关闭时视为可检索（兼容旧数据与默认启用） */
+    private static boolean isRetrievalEnabled(Knowledge k) {
+        return k == null || k.getEnabled() == null || Boolean.TRUE.equals(k.getEnabled());
     }
 
     /**

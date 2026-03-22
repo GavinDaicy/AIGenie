@@ -211,7 +211,9 @@ export default {
     async loadKnowledgeList() {
       try {
         const list = await getKnowledgeList()
-        this.knowledgeList = (list || []).filter(kl => kl.status === 2 || kl.status === 1)
+        this.knowledgeList = (list || []).filter(
+          kl => (kl.status === 2 || kl.status === 1) && kl.enabled !== false
+        )
       } catch (e) {
         this.knowledgeList = []
       }

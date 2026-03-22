@@ -7,6 +7,15 @@
       <h1 class="detail-title">{{ knowledge.name || knowledgeCode }}</h1>
     </div>
 
+    <el-alert
+      v-if="knowledge.enabled === false"
+      type="warning"
+      show-icon
+      :closable="false"
+      title="该知识库已禁用，不参与检索与智能问答。"
+      class="detail-enabled-alert"
+    />
+
     <el-tabs v-model="activeTab" class="detail-tabs">
       <el-tab-pane label="文档列表" name="doc">
         <el-card class="detail-card" shadow="never">
@@ -352,6 +361,9 @@ export default {
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--qg-text-primary);
+}
+.detail-enabled-alert {
+  margin-bottom: 16px;
 }
 .detail-tabs {
   :deep(.el-tabs__header) {

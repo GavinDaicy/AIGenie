@@ -109,3 +109,6 @@ ALTER TABLE `genie`.`knowledge`
   ADD COLUMN `time_decay_lambda` DOUBLE DEFAULT NULL COMMENT '可选：指数衰减参数 lambda（1/ms）',
   ADD COLUMN `time_decay_sigma` DOUBLE DEFAULT NULL COMMENT '可选：高斯衰减参数 sigma（ms）';
 
+-- 为 knowledge 表增加「是否参与检索与问答」标志（已有数据默认启用）
+ALTER TABLE `knowledge`
+  ADD COLUMN `enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否参与检索与问答：1 启用 0 禁用' AFTER `status`;

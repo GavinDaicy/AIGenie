@@ -40,6 +40,11 @@ public class Knowledge {
     private TimeDecayConfig timeDecayConfig;
     /** 知识库状态 */
     private KLState status;
+    /**
+     * 是否参与检索与智能问答；false 时仍可管理文档与配置。
+     * 新建默认 true；更新时若请求未传该字段则由服务端保留库内原值。
+     */
+    private Boolean enabled;
     /** 知识库创建时间 */
     private Date createTime;
     /** 知识库更新时间 */

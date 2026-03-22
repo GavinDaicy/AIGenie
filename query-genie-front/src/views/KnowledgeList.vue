@@ -20,6 +20,16 @@
             <span v-else>{{ row.status }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="检索/问答" width="112" align="center">
+          <template slot-scope="{ row }">
+            <el-tooltip content="关闭后检索与智能问答不再召回该库" placement="top">
+              <el-switch
+                :value="row.enabled !== false"
+                @change="val => handleEnabledChange(row, val)"
+              />
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="280" fixed="right">
           <template slot-scope="{ row }">
             <el-button type="text" size="small" @click="goDetail(row.code)">文档管理</el-button>
@@ -286,6 +296,23 @@ export default {
         this.list = await getKnowledgeList() || []
       } finally {
         this.loading = false
+      }
+    },
+    async handleEnabledChange(row, enabled) {
+      const prev = row.enabled !== false
+      try {
+        await updateKnowledge({
+          id: row.id,
+          code: row.code,
+          name: row.name,
+          description: row.description || '',
+          status: row.status,
+          enabled
+        })
+        this.$set(row, 'enabled', enabled)
+        this.$message.success(enabled ? '已启用检索与问答' : '已禁用检索与问答')
+      } catch (e) {
+        this.$set(row, 'enabled', prev ? true : false)
       }
     },
     openCreate() {
