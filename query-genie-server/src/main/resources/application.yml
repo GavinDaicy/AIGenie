@@ -38,6 +38,14 @@ app:
     sessions:
       list-limit: 100              # 会话列表单页最大条数
 
+  # 内部测试接口开关（仅开发/测试环境开启，生产保持 false）
+  internal-api:
+    enabled: ${APP_INTERNAL_API_ENABLED:false}
+
+  # Text-to-SQL 数据源密码加密（AES-128 Base64 编码密钥，生产环境通过环境变量注入）
+  datasource:
+    encrypt-key: ${DB_ENCRYPT_KEY:}
+
   # Agent 配置
   agent:
     model: ${APP_AGENT_MODEL:qwen-plus}          # Agent 使用的 Chat 模型（需支持 Function Calling）
