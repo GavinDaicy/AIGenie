@@ -16,6 +16,8 @@ public class ChatSession {
     private String title;
     /** 知识库编码列表，JSON 或逗号分隔 */
     private String knowledgeCodes;
+    /** 问答模式: RAG | AGENT */
+    private String mode;
     private Date createTime;
     private Date updateTime;
 }

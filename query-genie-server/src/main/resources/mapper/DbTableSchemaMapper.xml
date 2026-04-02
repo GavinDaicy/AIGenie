@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.genie.query.infrastructure.dao.mysql.mapper.DbTableSchemaMapper">
+
+    <insert id="insert" parameterType="com.genie.query.domain.schema.model.DbTableSchema">
+        insert into db_table_schema (id, datasource_id, table_name, alias, description, columns_json, sample_queries, enabled, created_at, updated_at)
+        values (#{id}, #{datasourceId}, #{tableName}, #{alias}, #{description}, #{columnsJson}, #{sampleQueries}, #{enabled}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="findById" resultType="com.genie.query.domain.schema.model.DbTableSchema">
+        select * from db_table_schema where id = #{id}
+    </select>
+
+    <select id="findByDatasourceIdAndTableName" resultType="com.genie.query.domain.schema.model.DbTableSchema">
+        select * from db_table_schema
+        where datasource_id = #{datasourceId} and table_name = #{tableName}
+    </select>
+
+    <select id="listByDatasourceId" resultType="com.genie.query.domain.schema.model.DbTableSchema">
+        select * from db_table_schema
+        where datasource_id = #{datasourceId}
+        order by table_name asc
+    </select>
+
+    <select id="listEnabledByDatasourceId" resultType="com.genie.query.domain.schema.model.DbTableSchema">
+        select * from db_table_schema
+        where datasource_id = #{datasourceId} and enabled = 1
+        order by table_name asc
+    </select>
+
+    <update id="update" parameterType="com.genie.query.domain.schema.model.DbTableSchema">
+        update db_table_schema
+        set alias              = #{alias},
+            description        = #{description},
+            columns_json       = #{columnsJson},
+            sample_queries       = #{sampleQueries},
+            enabled            = #{enabled},
+            updated_at         = now()
+        where id = #{id}
+    </update>
+
+    <update id="updateColumnsJson">
+        update db_table_schema
+        set columns_json = #{columnsJson},
+            updated_at   = now()
+        where id = #{id}
+    </update>
+
+    <update id="updateEnabled">
+        update db_table_schema
+        set enabled    = #{enabled},
+            updated_at = now()
+        where id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        delete from db_table_schema where id = #{id}
+    </delete>
+
+</mapper>

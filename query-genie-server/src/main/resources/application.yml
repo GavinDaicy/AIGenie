@@ -38,6 +38,13 @@ app:
     sessions:
       list-limit: 100              # 会话列表单页最大条数
 
+  # Agent 配置
+  agent:
+    model: ${APP_AGENT_MODEL:qwen-plus}          # Agent 使用的 Chat 模型（需支持 Function Calling）
+    max-iterations: ${APP_AGENT_MAX_ITERATIONS:8} # ReAct 循环最大迭代轮次
+    tool-timeout-seconds: 10                      # 单个工具调用超时（秒）
+    session-timeout-seconds: 60                   # 整体 Agent 会话超时（秒）
+
   # Query 改写与多查询生成
   query-rewrite:
     enabled: true                  # 是否默认启用 Query 改写
@@ -70,7 +77,7 @@ spring:
       # 智能问答使用的对话模型（与 Embedding 共用 api-key）
       chat:
         options:
-          model: qwen-turbo   # 可选 qwen-plus、qwen-max 等
+          model: qwen-plus    # 升级为 qwen-plus 以支持 Function Calling
           temperature: 0.7
           max-tokens: 2000
   # 服务器配置

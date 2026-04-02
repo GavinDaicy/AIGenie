@@ -195,7 +195,9 @@ export default {
       navItems: [
         { path: '/search', label: '检索', icon: 'el-icon-search' },
         { path: '/qa', label: '智能问答', icon: 'el-icon-chat-dot-round' },
-        { path: '/knowledge', label: '知识库', icon: 'el-icon-notebook-2', match: 'prefix' }
+        { path: '/knowledge', label: '知识库', icon: 'el-icon-notebook-2', match: 'prefix' },
+        { path: '/schema/datasources', label: '数据源', icon: 'el-icon-coin', match: 'exact' },
+        { path: '/schema/tables', label: '表结构', icon: 'el-icon-s-grid', match: 'prefix' }
       ]
     }
   },
