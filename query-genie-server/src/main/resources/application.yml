@@ -40,7 +40,7 @@ app:
 
   # 内部测试接口开关（仅开发/测试环境开启，生产保持 false）
   internal-api:
-    enabled: ${APP_INTERNAL_API_ENABLED:false}
+    enabled: ${APP_INTERNAL_API_ENABLED:true}
 
   # Text-to-SQL 数据源密码加密（AES-128 Base64 编码密钥，生产环境通过环境变量注入）
   datasource:

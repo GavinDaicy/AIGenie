@@ -96,7 +96,7 @@ public class SqlGenerationService {
      * 解析 LLM 输出为 SqlGenerationResult。
      * 期望格式：第一部分为查询思路行（"查询思路：..."），其余为 SQL 语句。
      */
-    SqlGenerationResult parseOutput(String llmOutput) {
+    public SqlGenerationResult parseOutput(String llmOutput) {
         if (StringUtils.isBlank(llmOutput)) {
             log.warn("[SqlGeneration] LLM 输出为空");
             return SqlGenerationResult.cannotQuery("LLM 未生成有效输出");

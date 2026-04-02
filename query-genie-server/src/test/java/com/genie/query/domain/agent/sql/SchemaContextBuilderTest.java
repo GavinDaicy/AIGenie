@@ -164,6 +164,18 @@ class SchemaContextBuilderTest {
     }
 
     @Test
+    void buildSchemaContext_withNonMatchingColumnFilter_shouldFallbackToAllColumns() {
+        Map<String, List<String>> wrongCols = Map.of("steel_price", List.of("knowledge_id"));
+
+        String context = builder.buildSchemaContext(List.of(steelPriceTable), wrongCols);
+
+        assertThat(context).contains("supplier_name");
+        assertThat(context).contains("steel_diameter");
+        assertThat(context).contains("unit_price");
+        assertThat(context).contains("price_date");
+    }
+
+    @Test
     void buildTablesSummary_shouldReturnEmptyString_whenNoEnabledTables() {
         DbTableSchema disabled = new DbTableSchema();
         disabled.setTableName("some_table");

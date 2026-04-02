@@ -66,11 +66,13 @@ public class SchemaContextBuilder {
         StringBuilder sb = new StringBuilder();
         for (DbTableSchema table : relevantTables) {
             List<String> allowedCols = linkedColumns.get(table.getTableName());
-            List<ColumnMeta> cols = table.parseColumns();
+            List<ColumnMeta> allCols = table.parseColumns();
+            List<ColumnMeta> cols = allCols;
             if (allowedCols != null && !allowedCols.isEmpty()) {
-                cols = cols.stream()
+                List<ColumnMeta> filtered = allCols.stream()
                         .filter(c -> allowedCols.contains(c.getName()))
                         .collect(Collectors.toList());
+                cols = filtered.isEmpty() ? allCols : filtered;
             }
 
             sb.append("表名: ").append(table.getTableName());
