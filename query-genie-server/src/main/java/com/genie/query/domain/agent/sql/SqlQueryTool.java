@@ -4,6 +4,8 @@ import com.genie.query.domain.schema.dao.DbTableSchemaDAO;
 import com.genie.query.domain.schema.model.DbTableSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -54,13 +56,33 @@ public class SqlQueryTool {
     private DbTableSchemaDAO dbTableSchemaDAO;
 
     /**
-     * 执行 Text-to-SQL 全流水线，返回格式化后的查询结果文本。
+     * Spring AI Tool Calling 入口：执行 Text-to-SQL 全流水线，返回格式化后的查询结果文本。
+     * 此方法由 Spring AI Agent 框架通过 Function Calling 调用。
      *
      * @param question     用户自然语言问题
      * @param datasourceId 目标数据源 ID
-     * @return 结果文本（Markdown 表格或 LLM 摘要），附带执行 SQL
+     * @return 格式化结果文本（Markdown 表格或 LLM 摘要）；失败时返回错误说明
      */
-    public SqlQueryResult querySql(String question, Long datasourceId) {
+    @Tool(description = "将自然语言转为SQL查询业务数据库，适用于价格分析、订单统计、供应商比较等数据聚合问题")
+    public String querySql(
+            @ToolParam(description = "用户的自然语言问题") String question,
+            @ToolParam(description = "数据源ID") Long datasourceId) {
+        SqlQueryResult result = executeQuery(question, datasourceId);
+        if (result.isSuccess() && result.getFormattedText() != null) {
+            return result.getFormattedText();
+        }
+        return result.getErrorMessage() != null ? result.getErrorMessage() : "查询未能返回结果";
+    }
+
+    /**
+     * 执行 Text-to-SQL 全流水线，返回结构化的查询结果对象。
+     * 供内部测试接口（SqlTestController）直接调用。
+     *
+     * @param question     用户自然语言问题
+     * @param datasourceId 目标数据源 ID
+     * @return 结构化结果（含 SQL、查询数据、格式化文本）
+     */
+    public SqlQueryResult executeQuery(String question, Long datasourceId) {
         log.info("[SqlQueryTool] 开始查询 | datasourceId={} | question={}", datasourceId, question);
 
         // Step 1: Schema Linking — LLM 从全量表中识别相关表和字段

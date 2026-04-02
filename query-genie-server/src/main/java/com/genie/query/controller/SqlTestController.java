@@ -85,7 +85,7 @@ public class SqlTestController {
         log.info("[SqlTest] question={}, datasourceId={}", request.getQuestion(), request.getDatasourceId());
 
         try {
-            SqlQueryResult result = sqlQueryTool.querySql(request.getQuestion(), request.getDatasourceId());
+            SqlQueryResult result = sqlQueryTool.executeQuery(request.getQuestion(), request.getDatasourceId());
             return ApiResult.success(buildResponse(result));
         } catch (Exception e) {
             log.error("[SqlTest] 执行异常: {}", e.getMessage(), e);
