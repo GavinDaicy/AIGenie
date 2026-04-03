@@ -8,13 +8,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.io.PrintWriter;
 
 /**
  * 基于 SSE（Server-Sent Events）的步骤事件发布实现。
  *
- * <p>将 {@link StepEvent} 序列化为 JSON 并通过 {@link SseEmitter} 推送给前端。
- * 写入失败时仅打印警告日志，不抛出异常，保证主流程不受 SSE 断连影响。
+ * <p>直接写入 {@link PrintWriter}（来自 HttpServletResponse.getWriter()）并立即 flush，
+ * 绕过 Spring SseEmitter 的所有缓冲层，确保每个事件实时到达 TCP socket。
  *
  * @author daicy
  * @date 2026/4/2
@@ -28,13 +29,12 @@ public class SseStepEventPublisher implements StepEventPublisher {
     private ObjectMapper objectMapper;
 
     @Override
-    public void publish(SseEmitter emitter, StepEvent event) {
-        if (emitter == null || event == null) return;
+    public void publish(PrintWriter writer, StepEvent event) {
+        if (writer == null || event == null) return;
         try {
             String json = objectMapper.writeValueAsString(event);
-            emitter.send(SseEmitter.event()
-                    .name("step")
-                    .data(json));
+            writer.write("event:step\ndata:" + json + "\n\n");
+            writer.flush();
             log.debug("[SsePublisher] 推送事件 | type={} | iteration={}",
                     event.getType(), event.getIteration());
         } catch (JsonProcessingException e) {
@@ -45,19 +45,9 @@ public class SseStepEventPublisher implements StepEventPublisher {
     }
 
     @Override
-    public void sendDone(SseEmitter emitter) {
-        if (emitter == null) return;
-        try {
-            emitter.send(SseEmitter.event()
-                    .name("done")
-                    .data("[DONE]"));
-            emitter.complete();
-        } catch (Exception e) {
-            log.warn("[SsePublisher] 发送 [DONE] 失败: {}", e.getMessage());
-            try {
-                emitter.complete();
-            } catch (Exception ignored) {
-            }
-        }
+    public void sendDone(PrintWriter writer) {
+        if (writer == null) return;
+        writer.write("event:done\ndata:[DONE]\n\n");
+        writer.flush();
     }
 }

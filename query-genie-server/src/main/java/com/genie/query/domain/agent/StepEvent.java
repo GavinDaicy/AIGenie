@@ -25,6 +25,10 @@ import lombok.Data;
 public class StepEvent {
 
     public enum Type {
+        ROUTING,
+        PLANNING,
+        THINKING,
+        THOUGHT_CHUNK,
         THOUGHT,
         TOOL_CALL,
         TOOL_RESULT,
@@ -40,6 +44,40 @@ public class StepEvent {
     private String params;
     private Long durationMs;
     private Long timestamp;
+
+    public static StepEvent routing(String questionType, String label) {
+        StepEvent e = new StepEvent();
+        e.type = Type.ROUTING;
+        e.content = label;
+        e.params = questionType;
+        e.timestamp = System.currentTimeMillis();
+        return e;
+    }
+
+    public static StepEvent planning(String content) {
+        StepEvent e = new StepEvent();
+        e.type = Type.PLANNING;
+        e.content = content;
+        e.timestamp = System.currentTimeMillis();
+        return e;
+    }
+
+    public static StepEvent thinking(int iteration) {
+        StepEvent e = new StepEvent();
+        e.type = Type.THINKING;
+        e.iteration = iteration;
+        e.timestamp = System.currentTimeMillis();
+        return e;
+    }
+
+    public static StepEvent thoughtChunk(int iteration, String chunk) {
+        StepEvent e = new StepEvent();
+        e.type = Type.THOUGHT_CHUNK;
+        e.iteration = iteration;
+        e.content = chunk;
+        e.timestamp = System.currentTimeMillis();
+        return e;
+    }
 
     public static StepEvent thought(int iteration, String content) {
         StepEvent e = new StepEvent();

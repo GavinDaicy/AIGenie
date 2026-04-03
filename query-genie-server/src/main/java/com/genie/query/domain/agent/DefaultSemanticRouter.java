@@ -65,6 +65,13 @@ public class DefaultSemanticRouter implements SemanticRouter {
 
         String trimmed = question.trim();
 
+        // 最高优先：含多个子问题的复合问题，直接路由 COMPLEX（确保全工具可用）
+        if (isMultiQuestion(trimmed)) {
+            log.debug("[SemanticRouter] 检测到多子问题（含{}个问号），直接路由 COMPLEX | question={}",
+                    countQuestionMarks(trimmed), trimmed);
+            return QuestionType.COMPLEX;
+        }
+
         // 优先：关键词规则（零成本，毫秒级）
         if (matchesAny(trimmed, DATA_QUERY_PATTERNS)) {
             log.debug("[SemanticRouter] 规则命中 DATA_QUERY | question={}", trimmed);
@@ -78,6 +85,14 @@ public class DefaultSemanticRouter implements SemanticRouter {
 
         // 兜底：LLM 分类（单次轻量调用）
         return llmClassify(trimmed);
+    }
+
+    private boolean isMultiQuestion(String question) {
+        return countQuestionMarks(question) >= 2;
+    }
+
+    private long countQuestionMarks(String question) {
+        return question.chars().filter(c -> c == '？' || c == '?').count();
     }
 
     private boolean matchesAny(String question, List<Pattern> patterns) {

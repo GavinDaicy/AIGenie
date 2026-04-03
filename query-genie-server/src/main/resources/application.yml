@@ -52,6 +52,8 @@ app:
     max-iterations: ${APP_AGENT_MAX_ITERATIONS:8} # ReAct 循环最大迭代轮次
     tool-timeout-seconds: 10                      # 单个工具调用超时（秒）
     session-timeout-seconds: 60                   # 整体 Agent 会话超时（秒）
+    max-history-turns: 5                          # 多轮对话：最多保留最近 N 轮完整历史
+    summarize-when-turns-over: 5                  # 多轮对话：超过此轮次触发 LLM 摘要压缩
 
   # Query 改写与多查询生成
   query-rewrite:

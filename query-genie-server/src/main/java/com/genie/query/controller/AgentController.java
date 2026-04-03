@@ -2,14 +2,16 @@ package com.genie.query.controller;
 
 import com.genie.query.application.AgentApplication;
 import com.genie.query.controller.dto.AgentAskRequest;
+import jakarta.servlet.AsyncContext;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.PrintWriter;
 import java.util.concurrent.Executor;
 
 /**
@@ -55,8 +57,10 @@ public class AgentController {
      * @param request Agent 问答请求
      * @return SSE 事件流（THOUGHT / TOOL_CALL / TOOL_RESULT / FINAL_ANSWER / ERROR）
      */
-    @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter askStream(@RequestBody AgentAskRequest request) {
+    @PostMapping("/ask/stream")
+    public void askStream(@RequestBody AgentAskRequest request,
+                          HttpServletRequest httpRequest,
+                          HttpServletResponse httpResponse) throws Exception {
         if (request.getQuestion() == null || request.getQuestion().isBlank()) {
             throw new IllegalArgumentException("question 不能为空");
         }
@@ -64,18 +68,30 @@ public class AgentController {
         log.info("[AgentController] 收到请求 | sessionId={} | question={}",
                 request.getSessionId(), request.getQuestion());
 
-        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        // 设置 SSE 响应头，直接刷出，让浏览器立即确认连接
+        httpResponse.setContentType("text/event-stream;charset=UTF-8");
+        httpResponse.setCharacterEncoding("UTF-8");
+        httpResponse.setHeader("Cache-Control", "no-cache");
+        httpResponse.setHeader("X-Accel-Buffering", "no");
 
-        emitter.onTimeout(() -> {
-            log.warn("[AgentController] SSE 连接超时 | sessionId={}", request.getSessionId());
-            emitter.complete();
+        // 启动 Servlet 异步模式，Servlet 线程不阻塞
+        AsyncContext asyncContext = httpRequest.startAsync();
+        asyncContext.setTimeout(SSE_TIMEOUT_MS);
+
+        // 获取 PrintWriter：Tomcat 直接写入底层 socket，flush() 立即到 TCP
+        PrintWriter writer = httpResponse.getWriter();
+        // 发送一个注释行，触发响应头立即提交到浏览器（确保 fetch().then() 即时 resolve）
+        writer.write(": ping\n\n");
+        writer.flush();
+
+        agentTaskExecutor.execute(() -> {
+            try {
+                agentApplication.handleQuestion(request, writer);
+            } catch (Exception e) {
+                log.error("[AgentController] Agent 执行异常 | error={}", e.getMessage(), e);
+            } finally {
+                asyncContext.complete();
+            }
         });
-        emitter.onError(ex -> {
-            log.warn("[AgentController] SSE 连接异常 | error={}", ex.getMessage());
-        });
-
-        agentTaskExecutor.execute(() -> agentApplication.handleQuestion(request, emitter));
-
-        return emitter;
     }
 }

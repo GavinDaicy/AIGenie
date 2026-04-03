@@ -82,13 +82,43 @@
                     </template>
                     <div class="step-list">
                       <div v-for="(step, idx) in msg.steps" :key="idx" class="step-item" :class="'step-' + step.type.toLowerCase()">
+                        <!-- ROUTING -->
+                        <template v-if="step.type === 'ROUTING'">
+                          <div class="step-header">
+                            <span class="step-icon routing-icon">🎯</span>
+                            <span class="step-label">意图识别：
+                              <el-tag size="mini" :type="getRoutingTagType(step.params)" effect="plain" class="routing-tag">
+                                {{ step.content }}
+                              </el-tag>
+                            </span>
+                          </div>
+                        </template>
+                        <!-- PLANNING -->
+                        <template v-else-if="step.type === 'PLANNING'">
+                          <div class="step-header">
+                            <span class="step-icon planning-icon">📝</span>
+                            <span class="step-label planning-label">{{ step.content }}</span>
+                          </div>
+                        </template>
+                        <!-- THINKING -->
+                        <template v-else-if="step.type === 'THINKING'">
+                          <div class="step-header">
+                            <span class="step-icon thinking-icon">⚙️</span>
+                            <span class="step-label">推理中（第 {{ step.iteration }} 轮）</span>
+                            <span class="step-thinking-dots">
+                              <span class="dot" /><span class="dot" /><span class="dot" />
+                            </span>
+                          </div>
+                        </template>
                         <!-- THOUGHT -->
-                        <template v-if="step.type === 'THOUGHT'">
+                        <template v-else-if="step.type === 'THOUGHT'">
                           <div class="step-header">
                             <span class="step-icon thought-icon">💭</span>
                             <span class="step-label">思考（第 {{ step.iteration }} 轮）</span>
                           </div>
-                          <div class="step-content thought-text">{{ step.content }}</div>
+                          <div class="step-content thought-text">
+                            {{ step.content }}<span v-if="step._streaming" class="stream-cursor">▌</span>
+                          </div>
                         </template>
                         <!-- TOOL_CALL -->
                         <template v-else-if="step.type === 'TOOL_CALL'">
@@ -388,18 +418,48 @@ export default {
 
       this.abortFn = agentAskStream(params, {
         onStep: (event) => {
+          debugger
           const msg = this.messages.find(m => m.id === assistantId)
           if (!msg) return
+
           if (event.type === 'FINAL_ANSWER') {
+            debugger
+            // 最终答案：将正在流式输出的 THOUGHT 标记为完成
+            msg.steps.forEach(s => { if (s._streaming) s._streaming = false })
             msg.loading = false
             msg.streaming = true
             this.typewriterAppend(msg, event.content || '')
+          } else if (event.type === 'THOUGHT_CHUNK') {
+            // 流式 Token：找到当前轮正在流式的 THOUGHT 步骤
+            let thoughtStep = msg.steps.find(
+              s => s.type === 'THOUGHT' && s.iteration === event.iteration && s._streaming
+            )
+            if (!thoughtStep) {
+              // 移除同轮次的 THINKING 占位步骤
+              const thinkIdx = msg.steps.findIndex(
+                s => s.type === 'THINKING' && s.iteration === event.iteration
+              )
+              if (thinkIdx >= 0) msg.steps.splice(thinkIdx, 1)
+              thoughtStep = {
+                type: 'THOUGHT',
+                iteration: event.iteration,
+                content: '',
+                _streaming: true
+              }
+              msg.steps.push(thoughtStep)
+            }
+            thoughtStep.content = (thoughtStep.content || '') + (event.content || '')
+          } else if (event.type === 'TOOL_CALL' || event.type === 'TOOL_RESULT') {
+            // 工具调用/返回：标记当前轮思考完成
+            msg.steps.forEach(s => { if (s._streaming && s.iteration === event.iteration) s._streaming = false })
+            msg.steps.push(event)
           } else {
             msg.steps.push(event)
           }
           this.$nextTick(() => this.scrollToBottom())
         },
         onChunk: (text) => {
+          debugger
           const msg = this.messages.find(m => m.id === assistantId)
           if (!msg) return
           msg.loading = false
@@ -408,8 +468,13 @@ export default {
           this.$nextTick(() => this.scrollToBottom())
         },
         onDone: () => {
+          debugger
           const msg = this.messages.find(m => m.id === assistantId)
-          if (msg) { msg.loading = false; msg.streaming = false }
+          if (msg) {
+            msg.loading = false
+            msg.streaming = false
+            msg.steps.forEach(s => { if (s._streaming) s._streaming = false })
+          }
           this.agentLoading = false
           this.abortFn = null
           // 更新会话标题
@@ -464,6 +529,11 @@ export default {
     truncate(str, len) {
       if (!str) return ''
       return str.length > len ? str.slice(0, len) + '\n…（内容已截断）' : str
+    },
+    getRoutingTagType(questionType) {
+      if (questionType === 'DATA_QUERY') return 'warning'
+      if (questionType === 'KNOWLEDGE') return 'success'
+      return 'info'
     }
   }
 }
@@ -825,6 +895,9 @@ export default {
   background: var(--qg-bg-card-soft);
   border-left: 3px solid transparent;
 
+  &.step-routing { border-left-color: #3b82f6; }
+  &.step-planning { border-left-color: #6366f1; background: transparent; padding: 4px 12px; }
+  &.step-thinking { border-left-color: #a78bfa; }
   &.step-thought { border-left-color: #8b5cf6; }
   &.step-tool_call { border-left-color: #f59e0b; }
   &.step-tool_result { border-left-color: #10b981; }
@@ -886,6 +959,28 @@ export default {
 @keyframes blink-cursor {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+.routing-tag { margin-left: 4px; }
+.planning-label { color: #6366f1; font-style: italic; }
+.step-thinking-dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 8px;
+  align-items: center;
+  .dot {
+    width: 4px; height: 4px; border-radius: 50%;
+    background: #a78bfa;
+    animation: blink 1.2s infinite both;
+    &:nth-child(2) { animation-delay: 0.2s; }
+    &:nth-child(3) { animation-delay: 0.4s; }
+  }
+}
+.stream-cursor {
+  display: inline-block;
+  color: #8b5cf6;
+  animation: blink-cursor 0.7s step-end infinite;
+  font-weight: 300;
+  margin-left: 1px;
 }
 .empty-answer { color: var(--qg-text-secondary); font-style: italic; }
 

@@ -1,7 +1,6 @@
 package com.genie.query.domain.agent;
 
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
+import java.io.PrintWriter;
 import java.util.List;
 
 /**
@@ -21,12 +20,10 @@ public interface AgentOrchestrator {
      * @param sessionId      会话 ID（携带历史上下文）
      * @param knowledgeCodes 可访问的知识库编码列表
      * @param datasourceIds  可访问的数据源 ID 列表
-     * @param emitter        SSE 推送器（由 Controller 层创建并传入）
-     */
-    /**
+     * @param writer         响应流写入器（由 AgentController 从 HttpServletResponse 获取）
      * @return 最终答案文本（供调用方持久化），若未产生答案则返回 null
      */
     String execute(String question, String sessionId,
                    List<String> knowledgeCodes, List<Long> datasourceIds,
-                   SseEmitter emitter);
+                   PrintWriter writer);
 }

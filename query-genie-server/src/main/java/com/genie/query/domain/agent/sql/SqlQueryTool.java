@@ -66,7 +66,7 @@ public class SqlQueryTool {
     @Tool(description = "将自然语言转为SQL查询业务数据库，适用于价格分析、订单统计、供应商比较等数据聚合问题")
     public String querySql(
             @ToolParam(description = "用户的自然语言问题") String question,
-            @ToolParam(description = "数据源ID") Long datasourceId) {
+            @ToolParam(description = "目标数据源ID（单个整数，必填）；如有多个可用数据源且问题涉及多个数据源，请对每个ID分别调用本工具") Long datasourceId) {
         SqlQueryResult result = executeQuery(question, datasourceId);
         if (result.isSuccess() && result.getFormattedText() != null) {
             return result.getFormattedText();

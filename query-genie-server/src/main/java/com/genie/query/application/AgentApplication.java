@@ -12,7 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import java.io.PrintWriter;
 
 import java.util.List;
 
@@ -49,19 +49,28 @@ public class AgentApplication {
     @Autowired(required = false)
     private SessionApplication sessionApplication;
 
+    private String buildRoutingLabel(QuestionType type) {
+        switch (type) {
+            case DATA_QUERY: return "数据查询";
+            case KNOWLEDGE:  return "知识问答";
+            default:         return "综合推理";
+        }
+    }
+
     /**
      * 处理 Agent 问答请求，通过 SSE 实时推送推理步骤与最终答案。
      *
      * @param request 用户请求（含问题、会话ID、可用知识库和数据源）
      * @param emitter SSE 推送器（由 Controller 层创建并传入）
      */
-    public void handleQuestion(AgentAskRequest request, SseEmitter emitter) {
+    public void handleQuestion(AgentAskRequest request, PrintWriter writer) {
         String question = request.getQuestion();
         String sessionId = request.getSessionId();
         List<String> knowledgeCodes = request.getKnowledgeCodes();
         List<Long> datasourceIds = request.getDatasourceIds();
 
-        // 语义路由分类
+        // 语义路由分类：先推送"识别中"状态
+        stepEventPublisher.publish(writer, StepEvent.planning("正在识别问题意图…"));
         QuestionType questionType;
         try {
             questionType = semanticRouter.route(question);
@@ -70,6 +79,8 @@ public class AgentApplication {
             log.warn("[AgentApplication] 语义路由异常，兜底 COMPLEX | error={}", e.getMessage());
             questionType = QuestionType.COMPLEX;
         }
+        // 推送意图识别结果
+        stepEventPublisher.publish(writer, StepEvent.routing(questionType.name(), buildRoutingLabel(questionType)));
 
         // 根据路由结果调整工具配置
         List<Long> effectiveDatasourceIds = datasourceIds;
@@ -87,11 +98,11 @@ public class AgentApplication {
             finalAnswer = agentOrchestrator.execute(
                     question, sessionId,
                     effectiveKnowledgeCodes, effectiveDatasourceIds,
-                    emitter);
+                    writer);
         } catch (Exception e) {
             log.error("[AgentApplication] Agent执行异常 | error={}", e.getMessage(), e);
-            stepEventPublisher.publish(emitter, StepEvent.error("系统错误: " + e.getMessage()));
-            stepEventPublisher.sendDone(emitter);
+            stepEventPublisher.publish(writer, StepEvent.error("系统错误: " + e.getMessage()));
+            stepEventPublisher.sendDone(writer);
         }
 
         // 持久化对话记录（同 QaApplication.persistChatTurnIfNeeded 逻辑）
