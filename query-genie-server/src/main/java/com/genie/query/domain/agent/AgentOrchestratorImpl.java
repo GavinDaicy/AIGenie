@@ -26,7 +26,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import java.io.PrintWriter;
-
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -59,19 +59,28 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     private static final String SYSTEM_PROMPT_TEMPLATE =
             "你是一个企业智能助手。请根据用户的问题，选择合适的工具来获取信息并给出准确答案。\n\n" +
+            "## 决策前置检查（每次回答前必须先完成）\n" +
+            "1. 判断所需数据类型：内部数据（querySql）/ 内部文档（searchKnowledge）/ 实时互联网（searchWeb）/ 混合\n" +
+            "2. 若倾向于调用 querySql，先检查\"查询对象\"是否明确（品类/规格/型号至少有一个具体值）：\n" +
+            "   - 不明确 → **必须先调用 askUser 获取规格**，禁止直接查询或猜测\n" +
+            "   - 明确 → 直接执行 querySql\n" +
+            "3. 内部数据库可查到的内容，优先 querySql，不要先走 searchWeb\n\n" +
             "## 工具选择规则\n" +
-            "1. **querySql**：需要查询内部数据库，如统计数量、价格排名、历史数据、汇总分析等结构化查询\n" +
-            "   ✅ 示例：'近半年钢筋最低价是多少' / '哪个供应商出货量最大' / '上季度销售额统计'\n" +
-            "   ❌ 不适用：知识文档内容、实时行情、概念解释\n" +
+            "1. **querySql**：查询内部数据库，如统计数量、价格记录、历史数据、汇总分析等结构化查询\n" +
+            "   ✅ 示例：'近半年螺纹钢HRB400最低采购价' / '哪个供应商出货量最大'\n" +
+            "   ❌ 不适用：知识文档内容、实时市场行情、概念解释\n" +
             "2. **searchKnowledge**：查找知识库中的产品说明、操作规范、技术文档、合同条款、流程规范等\n" +
             "   ✅ 示例：'钢筋验收标准是什么' / '如何填写采购申请' / '系统登录流程'\n" +
             "   ❌ 不适用：需要统计计算的数据分析、互联网实时信息\n" +
             "3. **searchWeb**：查询互联网实时信息，如最新市场价格、行业新闻、外部政策法规等\n" +
             "   ✅ 示例：'今日螺纹钢市场价' / '最新建材行业政策' / '2024年铜价走势'\n" +
             "   ❌ 不适用：内部数据库可查到的内容、知识库已有文档\n" +
-            "4. **askUser**：用户信息不足以完成任务时追问一个最关键的缺失信息\n" +
-            "   ✅ 示例：用户说'帮我查价格'但未说明品种规格 → 追问规格；说'最近销售'但未说时间 → 追问时间范围\n" +
-            "   ❌ 不适用：信息已充足时、可以合理默认推断时（如'最近'可默认近3个月）\n\n" +
+            "4. **askUser**：用户信息不足以完成任务时，**必须直接调用此工具**，禁止猜测或自行列举选项\n" +
+            "   ⚠️ 必须触发场景：querySql所需的品类/规格/型号不明确；统计范围不明确且无法合理推断\n" +
+            "   ✅ 示例：'帮我查钢筋价格' → askUser('请问需要查哪种规格的钢筋价格？如螺纹钢HRB400Φ16、盘螺Φ8等')\n" +
+            "   ✅ 示例：'查一下最近价格' → askUser('请问需要查什么产品的价格？')\n" +
+            "   ❌ 不适用：信息已充足可直接查询；时间不明确可默认近3个月（但品类/规格必须明确）\n" +
+            "   ⛔ 严禁：在信息不足时输出\"您可以确认以下哪个维度…\"等列举选项的文字，**必须直接调用 askUser 工具**\n\n" +
             "## 多工具使用规则\n" +
             "- 复杂问题可先后调用多个工具，每次针对一个具体子问题\n" +
             "- searchWeb 返回 SEARCH_UNAVAILABLE 时跳过，不要重复调用\n" +
@@ -83,7 +92,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             "## 强制规则\n" +
             "- 所有数字结论必须来自工具执行结果，禁止猜测或估算\n" +
             "- 工具结果无法直接回答问题时，立即尝试其他工具，不要在信息不完整时直接输出答案\n" +
-            "- askUser 每次只问一个问题，用户回复后继续完成任务，不要再次追问已知信息\n\n" +
+            "- askUser 每次只问一个问题，用户回复后继续完成任务，不要再次追问已知信息\n" +
+            "- 引用联网搜索结果时，在对应句子末尾标注来源序号，格式 [1]、[2]（序号与搜索结果【结果N】一致）\n\n" +
             "当前可用数据源 ID：%s\n" +
             "当前可用知识库：%s";
 
@@ -228,8 +238,15 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     long durationMs = System.currentTimeMillis() - startMs;
 
                     // 检测 AskUserTool 信号：推送追问事件并暂停本轮 Agent
-                    if (toolResult != null && toolResult.startsWith(AskUserTool.ASK_USER_SIGNAL)) {
-                        String askQuestion = toolResult.substring(AskUserTool.ASK_USER_SIGNAL.length()).trim();
+                    // 注意：Spring AI ToolCallback.call() 可能返回 JSON 编码字符串（如 "\"__ASK_USER__: ...\""），
+                    // 因此用 contains 替代 startsWith，用 indexOf 定位信号起始位置
+                    log.debug("[AgentOrchestrator] 工具原始返回 | tool={} | raw={}", toolName,
+                            toolResult == null ? "null" : toolResult.substring(0, Math.min(200, toolResult.length())));
+                    if (toolResult != null && toolResult.contains(AskUserTool.ASK_USER_SIGNAL)) {
+                        int sigIdx = toolResult.indexOf(AskUserTool.ASK_USER_SIGNAL);
+                        String askQuestion = toolResult.substring(sigIdx + AskUserTool.ASK_USER_SIGNAL.length()).trim();
+                        // 去除 JSON 编码产生的末尾引号/反斜杠等干扰字符
+                        askQuestion = askQuestion.replaceAll("[\"'\\\\}\\]]+$", "").trim();
                         log.info("[AgentOrchestrator] 检测到追问信号 | question={} | sessionId={}", askQuestion, sessionId);
                         stepEventPublisher.publish(writer, StepEvent.askUser(askQuestion));
                         persistAskUserMessageAsync(sessionId, askQuestion);
@@ -455,7 +472,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         String kbCodes = knowledgeCodes == null ? "（全部）"
                 : knowledgeCodes.isEmpty() ? "（不可用）"
                 : String.join(", ", knowledgeCodes);
-        return String.format(SYSTEM_PROMPT_TEMPLATE, dsIds, kbCodes);
+        return String.format(SYSTEM_PROMPT_TEMPLATE, dsIds, kbCodes)
+                + "\n当前日期：" + LocalDate.now();
     }
 
     private String resolveAllDatasourceIds() {
