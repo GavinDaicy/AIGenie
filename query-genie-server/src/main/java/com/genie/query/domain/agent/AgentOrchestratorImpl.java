@@ -59,23 +59,33 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     private static final String SYSTEM_PROMPT_TEMPLATE =
             "你是一个企业智能助手。请根据用户的问题，选择合适的工具来获取信息并给出准确答案。\n\n" +
-            "工具选择规则：\n" +
-            "1. 需要统计数量、排名、比较数值、查询历史记录、聚合汇总等问题 → 使用 querySql 工具（含\"多少\"\"最多\"\"最少\"\"统计\"\"排行\"等词）\n" +
-            "2. 查找产品说明、操作规范、概念解释、文档内容等知识型问题 → 使用 searchKnowledge 工具\n" +
-            "3. 复杂问题可先后使用多个工具，每次工具调用都应针对具体子问题\n\n" +
-            "多子问题处理规则（重要）：\n" +
-            "- 若用户问题包含多个子问题（如含多个\"？\"），必须逐一处理每个子问题\n" +
-            "- 每个子问题需单独调用工具获取结果，不得合并跳过任何一个\n" +
-            "- 收到工具结果后，主动检查是否还有未解决的子问题，有则继续调用工具\n" +
-            "- 只有全部子问题都已获得工具支持的答案后，才能输出最终答案\n" +
-            "- 最终答案需分条对应每个子问题\n\n" +
-            "强制规则：\n" +
+            "## 工具选择规则\n" +
+            "1. **querySql**：需要查询内部数据库，如统计数量、价格排名、历史数据、汇总分析等结构化查询\n" +
+            "   ✅ 示例：'近半年钢筋最低价是多少' / '哪个供应商出货量最大' / '上季度销售额统计'\n" +
+            "   ❌ 不适用：知识文档内容、实时行情、概念解释\n" +
+            "2. **searchKnowledge**：查找知识库中的产品说明、操作规范、技术文档、合同条款、流程规范等\n" +
+            "   ✅ 示例：'钢筋验收标准是什么' / '如何填写采购申请' / '系统登录流程'\n" +
+            "   ❌ 不适用：需要统计计算的数据分析、互联网实时信息\n" +
+            "3. **searchWeb**：查询互联网实时信息，如最新市场价格、行业新闻、外部政策法规等\n" +
+            "   ✅ 示例：'今日螺纹钢市场价' / '最新建材行业政策' / '2024年铜价走势'\n" +
+            "   ❌ 不适用：内部数据库可查到的内容、知识库已有文档\n" +
+            "4. **askUser**：用户信息不足以完成任务时追问一个最关键的缺失信息\n" +
+            "   ✅ 示例：用户说'帮我查价格'但未说明品种规格 → 追问规格；说'最近销售'但未说时间 → 追问时间范围\n" +
+            "   ❌ 不适用：信息已充足时、可以合理默认推断时（如'最近'可默认近3个月）\n\n" +
+            "## 多工具使用规则\n" +
+            "- 复杂问题可先后调用多个工具，每次针对一个具体子问题\n" +
+            "- searchWeb 返回 SEARCH_UNAVAILABLE 时跳过，不要重复调用\n" +
+            "- 有多个数据源ID时，针对每个相关ID分别调用 querySql，每次只传一个ID\n\n" +
+            "## 多子问题处理规则\n" +
+            "- 若用户问题含多个子问题（如含多个'？'），必须逐一处理，不得合并跳过\n" +
+            "- 收到工具结果后，检查是否还有未解决的子问题，有则继续调用工具\n" +
+            "- 所有子问题都有工具支持的答案后，才能输出最终结论，分条对应每个子问题\n\n" +
+            "## 强制规则\n" +
             "- 所有数字结论必须来自工具执行结果，禁止猜测或估算\n" +
-            "- 若某个工具的返回内容无法直接回答问题（如搜索结果未包含所需数量/统计数据），立即尝试改用其他工具，尽量不要在信息不完整时直接输出答案\n" +
-            "- 只有在工具结果已足够完整回答问题后，才能输出最终答案\n\n" +
+            "- 工具结果无法直接回答问题时，立即尝试其他工具，不要在信息不完整时直接输出答案\n" +
+            "- askUser 每次只问一个问题，用户回复后继续完成任务，不要再次追问已知信息\n\n" +
             "当前可用数据源 ID：%s\n" +
-            "当前可用知识库：%s\n\n" +
-            "多数据源规则：若有多个数据源ID，请针对每个相关ID分别调用 querySql 工具，每次只传一个ID";
+            "当前可用知识库：%s";
 
     @Value("${app.agent.max-iterations:8}")
     private int maxIterations;
@@ -94,6 +104,12 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     @Autowired
     private RagSearchTool ragSearchTool;
+
+    @Autowired
+    private WebSearchTool webSearchTool;
+
+    @Autowired
+    private AskUserTool askUserTool;
 
     @Autowired
     private StepEventPublisher stepEventPublisher;
@@ -127,7 +143,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
         try {
             // 初始化工具 Callback
-            ToolCallback[] toolCallbacks = ToolCallbacks.from(sqlQueryTool, ragSearchTool);
+            Object[] tools = new Object[]{sqlQueryTool, ragSearchTool, webSearchTool, askUserTool};
+            ToolCallback[] toolCallbacks = ToolCallbacks.from(tools);
             Map<String, ToolCallback> callbackMap = Arrays.stream(toolCallbacks)
                     .collect(Collectors.toMap(cb -> cb.getToolDefinition().name(), cb -> cb));
 
@@ -209,6 +226,16 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                         toolResult = "工具执行失败: " + e.getMessage();
                     }
                     long durationMs = System.currentTimeMillis() - startMs;
+
+                    // 检测 AskUserTool 信号：推送追问事件并暂停本轮 Agent
+                    if (toolResult != null && toolResult.startsWith(AskUserTool.ASK_USER_SIGNAL)) {
+                        String askQuestion = toolResult.substring(AskUserTool.ASK_USER_SIGNAL.length()).trim();
+                        log.info("[AgentOrchestrator] 检测到追问信号 | question={} | sessionId={}", askQuestion, sessionId);
+                        stepEventPublisher.publish(writer, StepEvent.askUser(askQuestion));
+                        persistAskUserMessageAsync(sessionId, askQuestion);
+                        stepEventPublisher.sendDone(writer);
+                        return null; // 暂停 ReAct 循环，等待用户回复
+                    }
 
                     // 推送 TOOL_RESULT 事件
                     StepEvent resultEvent = StepEvent.toolResult(i, toolName, toolResult, durationMs);
@@ -302,6 +329,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private org.springframework.ai.chat.messages.Message toSpringAiMessage(ChatTurn turn) {
         if ("user".equals(turn.getRole())) {
             return new UserMessage(turn.getContent());
+        } else if ("ask_user".equals(turn.getRole())) {
+            return new AssistantMessage("[Agent追问] " + turn.getContent());
         } else {
             return new AssistantMessage(turn.getContent());
         }
@@ -441,6 +470,26 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         } catch (Exception e) {
             log.warn("[AgentOrchestrator] 加载全量数据源ID失败，兜底显示全部: {}", e.getMessage());
             return "（全部）";
+        }
+    }
+
+    /**
+     * 将追问消息异步持久化到 chat_message（role=ask_user），供后续多轮历史注入使用。
+     */
+    @Async
+    protected void persistAskUserMessageAsync(String sessionId, String question) {
+        if (sessionId == null || chatMessageDAO == null) return;
+        try {
+            int nextOrder = chatMessageDAO.countBySessionId(sessionId);
+            ChatMessage askMsg = new ChatMessage();
+            askMsg.setSessionId(sessionId);
+            askMsg.setRole("ask_user");
+            askMsg.setContent(question);
+            askMsg.setSortOrder(nextOrder);
+            chatMessageDAO.insert(askMsg);
+            log.info("[AgentOrchestrator] 追问消息已落库 | sessionId={}", sessionId);
+        } catch (Exception e) {
+            log.warn("[AgentOrchestrator] 追问消息落库失败 | error={}", e.getMessage());
         }
     }
 

@@ -141,6 +141,18 @@
                           </div>
                           <div class="step-content">
                             <pre class="step-code result-code">{{ truncate(step.content, 600) }}</pre>
+                            <!-- I4-F2: searchWeb 来源链接 -->
+                            <div v-if="step.toolName === 'searchWeb'" class="web-source-links">
+                              <span class="source-links-label">来源：</span>
+                              <a
+                                v-for="(url, ui) in extractUrls(step.content)"
+                                :key="ui"
+                                :href="url"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="source-link"
+                              >{{ ui + 1 }}</a>
+                            </div>
                           </div>
                         </template>
                         <!-- ERROR -->
@@ -160,6 +172,27 @@
               <!-- 用户消息内容 -->
               <div v-if="msg.role === 'user'" class="bubble-content">
                 {{ msg.content }}
+              </div>
+
+              <!-- I4-F1: ASK_USER 追问气泡 -->
+              <div v-if="msg.role === 'assistant' && msg.isWaitingForUser" class="ask-user-bubble">
+                <div class="ask-user-question">
+                  <span class="ask-user-icon">❓</span>
+                  {{ msg.askUserQuestion }}
+                </div>
+                <div v-if="!msg.askUserAnswered" class="ask-user-reply-area">
+                  <el-input
+                    v-model="msg.askUserReply"
+                    size="small"
+                    placeholder="请输入您的回复…"
+                    class="ask-user-input"
+                    @keydown.native.enter.prevent="submitAskUserReply(msg)"
+                  />
+                  <el-button type="warning" size="small" @click="submitAskUserReply(msg)">回复</el-button>
+                </div>
+                <div v-else class="ask-user-answered">
+                  <span class="ask-user-answered-label">您的回复：</span>{{ msg.askUserAnsweredText }}
+                </div>
               </div>
 
               <!-- 最终答案 -->
@@ -418,17 +451,23 @@ export default {
 
       this.abortFn = agentAskStream(params, {
         onStep: (event) => {
-          debugger
           const msg = this.messages.find(m => m.id === assistantId)
           if (!msg) return
 
           if (event.type === 'FINAL_ANSWER') {
-            debugger
             // 最终答案：将正在流式输出的 THOUGHT 标记为完成
             msg.steps.forEach(s => { if (s._streaming) s._streaming = false })
             msg.loading = false
             msg.streaming = true
             this.typewriterAppend(msg, event.content || '')
+          } else if (event.type === 'ASK_USER') {
+            // 追问事件：显示追问气泡，暂停等待用户回复
+            msg.steps.forEach(s => { if (s._streaming) s._streaming = false })
+            msg.loading = false
+            msg.isWaitingForUser = true
+            msg.askUserQuestion = event.content || ''
+            msg.askUserReply = ''
+            msg.askUserAnswered = false
           } else if (event.type === 'THOUGHT_CHUNK') {
             // 流式 Token：找到当前轮正在流式的 THOUGHT 步骤
             let thoughtStep = msg.steps.find(
@@ -459,7 +498,6 @@ export default {
           this.$nextTick(() => this.scrollToBottom())
         },
         onChunk: (text) => {
-          debugger
           const msg = this.messages.find(m => m.id === assistantId)
           if (!msg) return
           msg.loading = false
@@ -468,7 +506,6 @@ export default {
           this.$nextTick(() => this.scrollToBottom())
         },
         onDone: () => {
-          debugger
           const msg = this.messages.find(m => m.id === assistantId)
           if (msg) {
             msg.loading = false
@@ -516,6 +553,21 @@ export default {
       }, 30)
     },
 
+    submitAskUserReply(msg) {
+      const reply = (msg.askUserReply || '').trim()
+      if (!reply || this.agentLoading) return
+      msg.askUserAnswered = true
+      msg.askUserAnsweredText = reply
+      msg.askUserReply = ''
+      this.inputQuestion = reply
+      this.handleSend()
+    },
+    extractUrls(text) {
+      if (!text) return []
+      const urlRegex = /https?:\/\/[^\s\u3000-\uffff"'<>）。，、！？]+/g
+      const matches = text.match(urlRegex) || []
+      return [...new Set(matches)].slice(0, 10)
+    },
     onInputKeydown(e) {
       if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); this.handleSend() }
     },
@@ -983,6 +1035,63 @@ export default {
   margin-left: 1px;
 }
 .empty-answer { color: var(--qg-text-secondary); font-style: italic; }
+
+/* I4-F2: web search 来源链接 */
+.web-source-links {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 11px;
+}
+.source-links-label { color: var(--qg-text-secondary); margin-right: 2px; }
+.source-link {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--qg-primary-weak);
+  color: var(--qg-primary);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 600;
+  &:hover { text-decoration: underline; filter: brightness(0.9); }
+}
+
+/* I4-F1: 追问气泡 */
+.ask-user-bubble {
+  border: 1.5px solid #f59e0b;
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: rgba(245, 158, 11, 0.06);
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.08);
+}
+.ask-user-question {
+  font-size: 14px;
+  color: var(--qg-text-primary);
+  line-height: 1.6;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.ask-user-icon { flex-shrink: 0; }
+.ask-user-reply-area {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  .ask-user-input { flex: 1; }
+}
+.ask-user-answered {
+  font-size: 13px;
+  color: var(--qg-text-secondary);
+  padding: 4px 0;
+}
+.ask-user-answered-label {
+  font-weight: 600;
+  color: #f59e0b;
+  margin-right: 4px;
+}
 
 /* 输入区 */
 .chat-input-wrap {

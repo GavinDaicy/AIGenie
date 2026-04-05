@@ -43,7 +43,7 @@ public class DefaultPlannerService implements PlannerService {
             "- 并列独立的多个问题（互不依赖，如\"总文档数？哪个知识库最多？\"）\n" +
             "- 知识问答（从知识库检索文档即可）\n" +
             "- 直接统计、排名、汇总类问题（无需中间结果转化）\n\n" +
-            "可用工具：querySql（数据库查询/统计/报价），searchKnowledge（知识库文档检索）\n\n" +
+            "可用工具：querySql（数据库查询/统计/报价），searchKnowledge（知识库文档检索），searchWeb（互联网实时搜索）\n\n" +
             "严格只输出 JSON，不要任何解释，不要 markdown 代码块：\n" +
             "不需要计划时：{\"needsPlan\":false}\n" +
             "需要计划时：\n" +

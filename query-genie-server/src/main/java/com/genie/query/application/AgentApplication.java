@@ -105,8 +105,8 @@ public class AgentApplication {
             stepEventPublisher.sendDone(writer);
         }
 
-        // 持久化对话记录（同 QaApplication.persistChatTurnIfNeeded 逻辑）
-        if (sessionId != null && finalAnswer != null && chatMessageDAO != null) {
+        // 持久化用户消息（无论是否有最终答案，user 消息均落库）
+        if (sessionId != null && chatMessageDAO != null) {
             try {
                 int nextOrder = chatMessageDAO.countBySessionId(sessionId);
 
@@ -117,19 +117,25 @@ public class AgentApplication {
                 userMsg.setSortOrder(nextOrder);
                 chatMessageDAO.insert(userMsg);
 
-                ChatMessage assistantMsg = new ChatMessage();
-                assistantMsg.setSessionId(sessionId);
-                assistantMsg.setRole("assistant");
-                assistantMsg.setContent(finalAnswer);
-                assistantMsg.setSortOrder(nextOrder + 1);
-                assistantMsg.setSources("[]");
-                chatMessageDAO.insert(assistantMsg);
-
+                // 首轮对话更新会话标题
                 if (nextOrder == 0 && sessionApplication != null) {
                     String title = question.length() > 30 ? question.substring(0, 30) + "..." : question;
                     sessionApplication.updateSessionTitle(sessionId, title);
                 }
-                log.info("[AgentApplication] 对话已落库 | sessionId={}", sessionId);
+
+                // 有最终答案时才持久化 assistant 消息（追问场景 finalAnswer 为 null）
+                if (finalAnswer != null) {
+                    ChatMessage assistantMsg = new ChatMessage();
+                    assistantMsg.setSessionId(sessionId);
+                    assistantMsg.setRole("assistant");
+                    assistantMsg.setContent(finalAnswer);
+                    assistantMsg.setSortOrder(nextOrder + 1);
+                    assistantMsg.setSources("[]");
+                    chatMessageDAO.insert(assistantMsg);
+                    log.info("[AgentApplication] 对话已落库 | sessionId={}", sessionId);
+                } else {
+                    log.info("[AgentApplication] Agent 暂停（追问），仅落库 user 消息 | sessionId={}", sessionId);
+                }
             } catch (Exception e) {
                 log.warn("[AgentApplication] 对话落库失败 | error={}", e.getMessage());
             }
