@@ -45,7 +45,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import com.genie.query.domain.cache.CacheService;
 
 /**
  * Agent 编排引擎实现：基于 Spring AI Tool Calling 驱动 ReAct 循环。
@@ -182,6 +184,13 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     @Autowired
     private PlannerService plannerService;
 
+    @Autowired
+    private CacheService cacheService;
+
+    /** askUser 暂停上下文的 Redis key 前缀，value 为已执行工具结果文本，TTL 10分钟 */
+    private static final String PAUSED_CTX_KEY_PREFIX = "agent:paused_ctx:";
+    private static final long PAUSED_CTX_TTL_MINUTES = 10L;
+
     @Override
     public AgentResult execute(String question, String sessionId,
                                List<String> knowledgeCodes, List<Long> datasourceIds,
@@ -202,6 +211,15 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             // 初始化消息历史
             String systemPrompt = buildSystemPrompt(datasourceIds, knowledgeCodes);
             context.addMessage(new SystemMessage(systemPrompt));
+
+            // 检查是否为 askUser 续跑：若有暂停前的工具结果，注入为上下文避免 LLM 重复执行
+            String pausedHint = getPausedContext(sessionId);
+            if (pausedHint != null) {
+                log.info("[AgentOrchestrator] 检测到 askUser 续跑上下文 | sessionId={}", sessionId);
+                context.addMessage(new SystemMessage(
+                        "[续跑上下文] 用户回复追问前，本轮已执行以下工具并得到结果，请勿重复执行：\n"
+                        + pausedHint));
+            }
 
             // 任务规划：优先尝试生成依赖链执行计划，fallback 到多子问题清单
             String contextHint = buildContextHint(question, knowledgeCodes, datasourceIds, sessionId, writer);
@@ -270,6 +288,16 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     if (AskUserTool.TOOL_NAME.equals(toolName)) {
                         String askQuestion = extractAskUserQuestion(toolArgs);
                         log.info("[AgentOrchestrator] 检测到 askUser 调用 | question={} | sessionId={}", askQuestion, sessionId);
+                        // 保存本轮已执行工具的结果到 Redis，续跑时注入为上下文（避免 LLM 重复调用工具）
+                        String toolResultsHint = buildToolResultsHint(context);
+                        if (!toolResultsHint.isBlank()) {
+                            cacheService.set(
+                                    PAUSED_CTX_KEY_PREFIX + sessionId,
+                                    toolResultsHint,
+                                    PAUSED_CTX_TTL_MINUTES,
+                                    TimeUnit.MINUTES);
+                            log.debug("[AgentOrchestrator] 已保存 askUser 暂停上下文到 Redis | sessionId={}", sessionId);
+                        }
                         stepEventPublisher.publish(writer, StepEvent.askUser(askQuestion));
                         persistAskUserMessageAsync(sessionId, askQuestion);
                         stepEventPublisher.sendDone(writer);
@@ -645,6 +673,32 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         } catch (Exception ex) {
             AgentOrchestratorImpl.log.warn("[AgentOrchestrator] 步骤持久化失败: {}", ex.getMessage());
         }
+    }
+
+    /**
+     * 从当前 AgentContext 的消息历史中提取已执行的工具结果文本。
+     * 用于 askUser 暂停前保存上下文，续跑时让 LLM 了解之前的工具结果，避免重复执行。
+     */
+    private String buildToolResultsHint(AgentContext context) {
+        return context.getMessages().stream()
+                .filter(m -> m instanceof ToolResponseMessage)
+                .map(m -> ((ToolResponseMessage) m).getResponses().stream()
+                        .map(r -> "工具[" + r.name() + "]结果：" + r.responseData())
+                        .collect(Collectors.joining("\n")))
+                .collect(Collectors.joining("\n\n"));
+    }
+
+    /**
+     * 从 Redis 取出并删除指定 session 的暂停上下文（一次性消费）。
+     * Redis TTL 到期后自动失效，无需手动判断过期。
+     */
+    private String getPausedContext(String sessionId) {
+        String key = PAUSED_CTX_KEY_PREFIX + sessionId;
+        String hint = cacheService.get(key);
+        if (hint != null) {
+            cacheService.delete(key);
+        }
+        return hint;
     }
 
     /**
