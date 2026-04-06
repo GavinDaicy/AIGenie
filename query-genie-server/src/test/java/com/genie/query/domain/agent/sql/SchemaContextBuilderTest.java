@@ -1,5 +1,7 @@
 package com.genie.query.domain.agent.sql;
 
+import com.genie.query.domain.agent.tool.sql.pipeline.SchemaContextBuilder;
+
 import com.alibaba.fastjson2.JSON;
 import com.genie.query.domain.schema.model.ColumnMeta;
 import com.genie.query.domain.schema.model.DbTableSchema;

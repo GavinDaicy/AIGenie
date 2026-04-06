@@ -1,5 +1,9 @@
 package com.genie.query.domain.agent.sql;
 
+import com.genie.query.domain.agent.tool.sql.pipeline.SchemaLinkingService;
+import com.genie.query.domain.agent.tool.sql.pipeline.SchemaContextBuilder;
+import com.genie.query.domain.agent.tool.sql.model.SchemaLinkingResult;
+
 import com.genie.query.domain.schema.dao.DbTableSchemaDAO;
 import com.genie.query.domain.schema.model.DbTableSchema;
 import org.junit.jupiter.api.BeforeEach;

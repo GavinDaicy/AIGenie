@@ -1,6 +1,6 @@
 package com.genie.query.infrastructure.dao.mysql;
 
-import com.genie.query.domain.agent.dao.AgentStepLogDAO;
+import com.genie.query.domain.agent.repository.AgentStepLogRepository;
 import com.genie.query.domain.agent.model.AgentStepLog;
 import com.genie.query.infrastructure.dao.mysql.mapper.AgentStepLogMapper;
 import com.genie.query.infrastructure.util.snowflake.SnowflakeIdUtils;
@@ -17,7 +17,7 @@ import java.util.List;
  * @date 2026/4/2
  */
 @Repository
-public class AgentStepLogDaoImpl implements AgentStepLogDAO {
+public class AgentStepLogDaoImpl implements AgentStepLogRepository {
 
     @Autowired
     private AgentStepLogMapper agentStepLogMapper;

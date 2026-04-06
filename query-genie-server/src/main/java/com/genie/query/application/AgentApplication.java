@@ -2,12 +2,12 @@ package com.genie.query.application;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.genie.query.controller.dto.AgentAskRequest;
-import com.genie.query.domain.agent.AgentOrchestrator;
-import com.genie.query.domain.agent.AgentResult;
-import com.genie.query.domain.agent.QuestionType;
-import com.genie.query.domain.agent.SemanticRouter;
-import com.genie.query.domain.agent.StepEvent;
-import com.genie.query.domain.agent.StepEventPublisher;
+import com.genie.query.domain.agent.orchestration.AgentOrchestrator;
+import com.genie.query.domain.agent.orchestration.AgentResult;
+import com.genie.query.domain.agent.routing.QuestionType;
+import com.genie.query.domain.agent.routing.SemanticRouter;
+import com.genie.query.domain.agent.event.StepEvent;
+import com.genie.query.domain.agent.event.StepEventPublisher;
 import com.genie.query.domain.chat.dao.ChatMessageDAO;
 import com.genie.query.domain.chat.model.ChatMessage;
 

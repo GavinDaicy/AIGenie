@@ -1,8 +1,8 @@
 package com.genie.query.infrastructure.datasource;
 
-import com.genie.query.domain.agent.sql.ExplainResult;
-import com.genie.query.domain.agent.sql.QueryResult;
-import com.genie.query.domain.agent.sql.SqlExecutor;
+import com.genie.query.domain.agent.tool.sql.model.ExplainResult;
+import com.genie.query.domain.agent.tool.sql.model.QueryResult;
+import com.genie.query.domain.agent.tool.sql.SqlExecutor;
 import com.genie.query.domain.exception.QueryTimeoutException;
 import com.genie.query.domain.schema.dao.DbDatasourceDAO;
 import com.genie.query.domain.schema.model.DbDatasource;

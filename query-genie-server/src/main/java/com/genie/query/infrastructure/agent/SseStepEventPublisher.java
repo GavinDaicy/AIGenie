@@ -2,8 +2,8 @@ package com.genie.query.infrastructure.agent;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.genie.query.domain.agent.StepEvent;
-import com.genie.query.domain.agent.StepEventPublisher;
+import com.genie.query.domain.agent.event.StepEvent;
+import com.genie.query.domain.agent.event.StepEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

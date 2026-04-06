@@ -1,5 +1,8 @@
 package com.genie.query.domain.agent.sql;
 
+import com.genie.query.domain.agent.tool.sql.pipeline.SqlSecurityValidator;
+import com.genie.query.domain.agent.tool.sql.model.ValidationResult;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

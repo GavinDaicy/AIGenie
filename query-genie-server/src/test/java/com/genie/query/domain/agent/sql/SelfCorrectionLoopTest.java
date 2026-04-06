@@ -1,5 +1,16 @@
 package com.genie.query.domain.agent.sql;
 
+import com.genie.query.domain.agent.tool.sql.pipeline.SelfCorrectionLoop;
+import com.genie.query.domain.agent.tool.sql.pipeline.SqlGenerationService;
+import com.genie.query.domain.agent.tool.sql.pipeline.SqlSecurityValidator;
+import com.genie.query.domain.agent.tool.sql.pipeline.DynamicFewShotService;
+import com.genie.query.domain.agent.tool.sql.SqlExecutor;
+import com.genie.query.domain.agent.tool.sql.model.SqlQueryResult;
+import com.genie.query.domain.agent.tool.sql.model.SqlGenerationResult;
+import com.genie.query.domain.agent.tool.sql.model.ValidationResult;
+import com.genie.query.domain.agent.tool.sql.model.ExplainResult;
+import com.genie.query.domain.agent.tool.sql.model.QueryResult;
+
 import com.genie.query.domain.exception.QueryTimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

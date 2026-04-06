@@ -1,7 +1,13 @@
 package com.genie.query.controller;
 
 import com.genie.query.controller.dto.SqlTestRequest;
-import com.genie.query.domain.agent.sql.*;
+import com.genie.query.domain.agent.tool.sql.SqlQueryTool;
+import com.genie.query.domain.agent.tool.sql.pipeline.SchemaLinkingService;
+import com.genie.query.domain.agent.tool.sql.pipeline.SchemaContextBuilder;
+import com.genie.query.domain.agent.tool.sql.pipeline.SqlGenerationService;
+import com.genie.query.domain.agent.tool.sql.model.SchemaLinkingResult;
+import com.genie.query.domain.agent.tool.sql.model.SqlGenerationResult;
+import com.genie.query.domain.agent.tool.sql.model.SqlQueryResult;
 import com.genie.query.domain.schema.dao.DbTableSchemaDAO;
 import com.genie.query.domain.schema.model.DbTableSchema;
 import com.genie.query.infrastructure.api.ApiResult;

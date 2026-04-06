@@ -1,6 +1,6 @@
 package com.genie.query.infrastructure.dao.mysql;
 
-import com.genie.query.domain.agent.dao.AgentFeedbackDAO;
+import com.genie.query.domain.agent.repository.AgentFeedbackRepository;
 import com.genie.query.domain.agent.model.AgentFeedback;
 import com.genie.query.infrastructure.dao.mysql.mapper.AgentFeedbackMapper;
 import com.genie.query.infrastructure.util.snowflake.SnowflakeIdUtils;
@@ -17,7 +17,7 @@ import java.util.List;
  * @date 2026/4/2
  */
 @Repository
-public class AgentFeedbackDaoImpl implements AgentFeedbackDAO {
+public class AgentFeedbackDaoImpl implements AgentFeedbackRepository {
 
     @Autowired
     private AgentFeedbackMapper agentFeedbackMapper;

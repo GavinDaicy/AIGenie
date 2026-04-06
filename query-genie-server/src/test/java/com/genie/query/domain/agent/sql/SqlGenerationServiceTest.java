@@ -1,5 +1,8 @@
 package com.genie.query.domain.agent.sql;
 
+import com.genie.query.domain.agent.tool.sql.pipeline.SqlGenerationService;
+import com.genie.query.domain.agent.tool.sql.model.SqlGenerationResult;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;

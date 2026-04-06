@@ -1,5 +1,8 @@
 package com.genie.query.domain.agent;
 
+import com.genie.query.domain.agent.routing.DefaultSemanticRouter;
+import com.genie.query.domain.agent.routing.QuestionType;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
