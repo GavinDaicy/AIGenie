@@ -1,5 +1,7 @@
 package com.genie.query.domain.agent;
 
+import com.genie.query.domain.agent.citation.CitationItem;
+import com.genie.query.domain.agent.citation.CitationRegistry;
 import com.genie.query.domain.query.model.QueryResultEntry;
 import com.genie.query.domain.qa.service.QaQueryService;
 import com.genie.query.domain.vectorstore.SearchMode;
@@ -69,6 +71,10 @@ public class RagSearchTool {
             }
 
             log.info("[RagSearchTool] 检索到 {} 条结果", results.size());
+            for (QueryResultEntry result : results) {
+                registerCitation(result);
+            }
+
             return formatResults(results);
         } catch (Exception e) {
             log.warn("[RagSearchTool] 检索异常: {}", e.getMessage());
@@ -117,9 +123,9 @@ public class RagSearchTool {
 
         String header;
         if (!sectionTitle.isBlank()) {
-            header = String.format("【参考%d】[知识库: %s] [文档: %s] [章节: %s]", index, kb, docName, sectionTitle);
+            header = String.format("【知识片段】[知识库: %s] [文档: %s] [章节: %s]", kb, docName, sectionTitle);
         } else {
-            header = String.format("【参考%d】[知识库: %s] [文档: %s]", index, kb, docName);
+            header = String.format("【知识片段】[知识库: %s] [文档: %s]", kb, docName);
         }
 
         String body = formatChunkContent(chunk);
@@ -135,5 +141,17 @@ public class RagSearchTool {
                 .filter(e -> !"section_title".equals(e.getKey()))
                 .map(e -> e.getValue().toString())
                 .collect(Collectors.joining("\n"));
+    }
+
+    private void registerCitation(QueryResultEntry entry) {
+        CitationItem item = new CitationItem();
+        item.setType(CitationItem.CitationType.KB);
+        item.setKnowledgeCode(entry.getKnowledgeCode());
+        item.setScore(entry.getScore());
+        item.setChunkContent(entry.getChunkContent());
+        if (entry.getDocument() != null) {
+            item.setDocumentName(entry.getDocument().getName());
+        }
+        CitationRegistry.register(item);
     }
 }

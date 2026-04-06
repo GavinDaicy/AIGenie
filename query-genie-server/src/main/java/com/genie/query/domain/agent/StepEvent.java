@@ -1,7 +1,10 @@
 package com.genie.query.domain.agent;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.genie.query.domain.agent.citation.CitationItem;
 import lombok.Data;
+
+import java.util.List;
 
 /**
  * Agent 推理步骤事件：通过 SSE 实时推送给前端。
@@ -34,6 +37,7 @@ public class StepEvent {
         TOOL_RESULT,
         ASK_USER,
         FINAL_ANSWER,
+        CITATIONS,
         ERROR
     }
 
@@ -44,6 +48,10 @@ public class StepEvent {
     private String params;
     private Long durationMs;
     private Long timestamp;
+    /** 工具调用对应的引用编号（TOOL_RESULT 事件使用，对应答案中 [N] 的 N） */
+    private Integer citationIndex;
+    /** 本轮所有引用数据（CITATIONS 事件使用） */
+    private List<CitationItem> citations;
 
     public static StepEvent routing(String questionType, String label) {
         StepEvent e = new StepEvent();
@@ -99,12 +107,26 @@ public class StepEvent {
     }
 
     public static StepEvent toolResult(int iteration, String toolName, String content, long durationMs) {
+        return toolResult(iteration, toolName, content, durationMs, null);
+    }
+
+    public static StepEvent toolResult(int iteration, String toolName, String content,
+                                       long durationMs, Integer citationIndex) {
         StepEvent e = new StepEvent();
         e.type = Type.TOOL_RESULT;
         e.iteration = iteration;
         e.toolName = toolName;
         e.content = content;
         e.durationMs = durationMs;
+        e.citationIndex = citationIndex;
+        e.timestamp = System.currentTimeMillis();
+        return e;
+    }
+
+    public static StepEvent citations(List<CitationItem> citations) {
+        StepEvent e = new StepEvent();
+        e.type = Type.CITATIONS;
+        e.citations = citations;
         e.timestamp = System.currentTimeMillis();
         return e;
     }

@@ -1,5 +1,7 @@
 package com.genie.query.domain.agent;
 
+import com.genie.query.domain.agent.citation.CitationItem;
+import com.genie.query.domain.agent.citation.CitationRegistry;
 import com.genie.query.domain.agent.dao.AgentStepLogDAO;
 import com.genie.query.domain.agent.model.AgentStepLog;
 import com.genie.query.domain.agent.sql.SqlQueryTool;
@@ -7,6 +9,9 @@ import com.genie.query.domain.chat.dao.ChatMessageDAO;
 import com.genie.query.domain.chat.model.ChatMessage;
 import com.genie.query.domain.qa.model.ChatTurn;
 import com.genie.query.domain.qa.service.ConversationSummarizer;
+import com.genie.query.domain.knowledge.dao.KnowledgeDAO;
+import com.genie.query.domain.knowledge.model.KLState;
+import com.genie.query.domain.knowledge.model.Knowledge;
 import com.genie.query.domain.schema.dao.DbDatasourceDAO;
 import com.genie.query.domain.schema.model.DbDatasource;
 import org.slf4j.Logger;
@@ -62,30 +67,52 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     private static final String SYSTEM_PROMPT_TEMPLATE =
             "你是一个企业智能助手。请根据用户的问题，选择合适的工具来获取信息并给出准确答案。\n\n" +
-            "## 决策前置检查（每次回答前必须先完成）\n" +
-            "1. 判断所需数据类型：内部数据（querySql）/ 内部文档（searchKnowledge）/ 实时互联网（searchWeb）/ 混合\n" +
-            "2. 若倾向于调用 querySql，先检查\"查询对象\"是否明确（品类/规格/型号至少有一个具体值）：\n" +
-            "   - 不明确 → **必须先调用 askUser 获取规格**，禁止直接查询或猜测\n" +
-            "   - 明确 → 直接执行 querySql\n" +
-            "3. 内部数据库可查到的内容，优先 querySql，不要先走 searchWeb\n\n" +
-            "## 工具选择规则\n" +
-            "1. **querySql**：查询内部数据库，如统计数量、价格记录、历史数据、汇总分析等结构化查询\n" +
-            "   ✅ 示例：'近半年螺纹钢HRB400最低采购价' / '哪个供应商出货量最大'\n" +
-            "   ❌ 不适用：知识文档内容、实时市场行情、概念解释\n" +
+            "## 工具选择决策（每次回答前按顺序判断）\n" +
+            "1. 问题是否**明确需要实时外部信息**（今日/最新市场行情、行业新闻、外部政策等信号词）？\n" +
+            "   - 是 → 直接调用 searchWeb，无需先查内部工具\n" +
+            "2. 问题是否属于**统计分析类**（聚合/排名/趋势/对比，强依赖数据完整性）？\n" +
+            "   - 是 → 仅调用 querySql（RAG 基于分块召回，样本不完整，不适合聚合统计场景）\n" +
+            "3. 问题是否属于**纯知识文档类**（概念解释/操作规范/合同条款/流程手册）？\n" +
+            "   - 是 → 仅调用 searchKnowledge\n" +
+            "4. 其他一般查询类问题，且用户提供了**任意一个可识别的查询主体**（大类即可，如\"钢筋\"）？\n" +
+            "   - 是 → **同时调用 querySql 和 searchKnowledge**，等两个结果都返回后合并生成最终答案\n" +
+            "5. 内部工具（querySql + searchKnowledge）均返回无结果？\n" +
+            "   - 是 → 调用 searchWeb 补充外部信息\n" +
+            "6. 完全无法识别任何查询主体（连大类都没有，不知道查什么）？\n" +
+            "   - 是 → 调用 askUser，询问**最关键的一个缺失信息**\n\n" +
+            "## 宽松查询原则\n" +
+            "- 有查询主体（任何大类/名称）就直接查，不要以信息不完整为由拒绝或追问\n" +
+            "- 时间范围不明确时默认近3个月，在答案中注明\"基于近3个月数据\"\n" +
+            "- 仅当完全无法确定查询主体（不知道查什么）时，才调用 askUser 追问\n\n" +
+            "## 工具使用规则\n" +
+            "1. **querySql**：查询内部数据库中的任意结构化数据，适用于统计数量、排名、趋势、明细、汇总等各类需要精确数据的问题\n" +
+            "   ✅ 适用：任意数量统计、记录明细查询、历史数据分析、聚合汇总——查询范围以上方列出的数据源为准\n" +
+            "   ⚠️ 关键：不要因问题领域与示例不同就跳过此工具，凡是数据源中可能存有的结构化数据均可查\n" +
+            "   ❌ 不适用：知识文档内容、实时市场行情、纯概念解释\n" +
             "2. **searchKnowledge**：查找知识库中的产品说明、操作规范、技术文档、合同条款、流程规范等\n" +
             "   ✅ 示例：'钢筋验收标准是什么' / '如何填写采购申请' / '系统登录流程'\n" +
             "   ❌ 不适用：需要统计计算的数据分析、互联网实时信息\n" +
             "3. **searchWeb**：查询互联网实时信息，如最新市场价格、行业新闻、外部政策法规等\n" +
+            "   🔑 优先触发：问题中含\"今日/最新/最近市场/实时\"等明确外部信息信号词，直接调用此工具\n" +
             "   ✅ 示例：'今日螺纹钢市场价' / '最新建材行业政策' / '2024年铜价走势'\n" +
             "   ❌ 不适用：内部数据库可查到的内容、知识库已有文档\n" +
-            "4. **askUser**：用户信息不足以完成任务时，**必须直接调用此工具**，禁止猜测或自行列举选项\n" +
-            "   ⚠️ 必须触发场景：querySql所需的品类/规格/型号不明确；统计范围不明确且无法合理推断\n" +
-            "   ✅ 示例：'帮我查钢筋价格' → askUser('请问需要查哪种规格的钢筋价格？如螺纹钢HRB400Φ16、盘螺Φ8等')\n" +
-            "   ✅ 示例：'查一下最近价格' → askUser('请问需要查什么产品的价格？')\n" +
-            "   ❌ 不适用：信息已充足可直接查询；时间不明确可默认近3个月（但品类/规格必须明确）\n" +
-            "   ⛔ 严禁：在信息不足时输出\"您可以确认以下哪个维度…\"等列举选项的文字，**必须直接调用 askUser 工具**\n\n" +
+            "   ⚠️ 后备触发：searchKnowledge 和 querySql 均返回无结果时才作为补充手段\n" +
+            "4. **askUser**：**最后手段**，仅当完全无法识别任何查询主体时才使用\n" +
+            "   ✅ 必须触发：'帮我查一下价格' / '查一下最近的数据'（完全不知道查什么）\n" +
+            "   ❌ 禁止触发：'查钢筋价格'（\"钢筋\"已是足够的查询主体，直接查，结果中提示可补充规格）\n" +
+            "   ❌ 禁止触发：'查一下最近钢筋价格'（时间不明确不是理由，默认近3个月）\n" +
+            "   ❌ 禁止触发：已有品类但缺少精确规格时（用品类条件查，答案中提示补充细节）\n" +
+            "   ⛔ 时间范围不明确：一律默认近3个月，不追问\n" +
+            "   ⛔ 规格不明确但品类明确：用品类条件查询，答案末尾提示精化建议\n" +
+            "   ⛔ 严禁：输出\"您可以确认以下哪个维度…\"等列举选项文字，**必须直接调用 askUser 工具**\n\n" +
+            "## 并行工具调用规则（优先）\n" +
+            "对于同时涉及内部数据和知识文档的通用查询，**必须在同一轮同时调用 querySql 和 searchKnowledge**，无需等待其中一个结果再决定是否调用另一个：\n" +
+            "- ✅ 并行：「XXX价格和验收标准」→ querySql + searchKnowledge 同时发出\n" +
+            "- ✅ 并行：「钢筋采购记录和规格说明」→ querySql + searchKnowledge 同时发出\n" +
+            "- ❌ 仅 querySql：「近半年各供应商采购量排名」（统计排名，纯 DB 聚合）\n" +
+            "- ❌ 仅 searchKnowledge：「钢筋验收标准是什么」（纯知识文档）\n" +
+            "- ❌ 优先 searchWeb：「今日市场行情」（实时外部信息，内部无法回答）\n\n" +
             "## 多工具使用规则\n" +
-            "- 复杂问题可先后调用多个工具，每次针对一个具体子问题\n" +
             "- searchWeb 返回 SEARCH_UNAVAILABLE 时跳过，不要重复调用\n" +
             "- 有多个数据源ID时，针对每个相关ID分别调用 querySql，每次只传一个ID\n\n" +
             "## 多子问题处理规则\n" +
@@ -96,9 +123,9 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             "- 所有数字结论必须来自工具执行结果，禁止猜测或估算\n" +
             "- 工具结果无法直接回答问题时，立即尝试其他工具，不要在信息不完整时直接输出答案\n" +
             "- askUser 每次只问一个问题，用户回复后继续完成任务，不要再次追问已知信息\n" +
-            "- 引用联网搜索结果时，在对应句子末尾标注来源序号，格式 [1]、[2]（序号与搜索结果【结果N】一致）\n\n" +
-            "当前可用数据源 ID：%s\n" +
-            "当前可用知识库：%s";
+            "- 在最终答案中引用工具数据时，在该句末尾标注 [N]，N 为对应工具返回结果末尾注明的「引用编号」；若工具结果未注明引用编号，则不添加角标\n\n" +
+            "当前可用数据源（ID、名称、用途说明）：%s\n" +
+            "当前可用知识库编码：%s";
 
     @Value("${app.agent.max-iterations:8}")
     private int maxIterations;
@@ -137,6 +164,9 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private DbDatasourceDAO dbDatasourceDAO;
 
     @Autowired(required = false)
+    private KnowledgeDAO knowledgeDAO;
+
+    @Autowired(required = false)
     private ChatMessageDAO chatMessageDAO;
 
     @Autowired(required = false)
@@ -146,13 +176,14 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private PlannerService plannerService;
 
     @Override
-    public String execute(String question, String sessionId,
-                          List<String> knowledgeCodes, List<Long> datasourceIds,
-                          PrintWriter writer) {
+    public AgentResult execute(String question, String sessionId,
+                               List<String> knowledgeCodes, List<Long> datasourceIds,
+                               PrintWriter writer) {
 
         AgentContext context = new AgentContext(sessionId, question, knowledgeCodes, datasourceIds);
         log.info("[AgentOrchestrator] 开始执行 | sessionId={} | question={}", sessionId, question);
         String finalAnswer = null;
+        List<CitationItem> allCitations = new ArrayList<>();
 
         try {
             // 初始化工具 Callback
@@ -205,6 +236,9 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     log.info("[AgentOrchestrator] 无工具调用，输出最终答案 | iteration={}", i);
                     String thought = assistantMsg.getText();
                     finalAnswer = (thought == null || thought.isBlank()) ? "（无结果）" : thought;
+                    if (!allCitations.isEmpty()) {
+                        stepEventPublisher.publish(writer, StepEvent.citations(allCitations));
+                    }
                     stepEventPublisher.publish(writer, StepEvent.finalAnswer(finalAnswer));
                     persistStepAsync(sessionId, i, "FINAL_ANSWER", null, finalAnswer, 0);
                     break;
@@ -232,7 +266,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                         stepEventPublisher.publish(writer, StepEvent.askUser(askQuestion));
                         persistAskUserMessageAsync(sessionId, askQuestion);
                         stepEventPublisher.sendDone(writer);
-                        return null; // 暂停 ReAct 循环，等待用户回复
+                        CitationRegistry.cleanup();
+                        return AgentResult.paused(); // 暂停 ReAct 循环，等待用户回复
                     }
 
                     // 执行工具
@@ -251,14 +286,42 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     }
                     long durationMs = System.currentTimeMillis() - startMs;
 
-                    // 推送 TOOL_RESULT 事件
-                    StepEvent resultEvent = StepEvent.toolResult(i, toolName, toolResult, durationMs);
+                    // 从 CitationRegistry 取出本次工具调用注册的引用，每条单独分配全局递增编号
+                    List<CitationItem> toolCitations = CitationRegistry.drainAndClear();
+                    Integer firstCitationIndex = null;
+                    if (!toolCitations.isEmpty()) {
+                        for (CitationItem c : toolCitations) {
+                            c.setIndex(CitationRegistry.nextIndex());
+                        }
+                        firstCitationIndex = toolCitations.get(0).getIndex();
+                        allCitations.addAll(toolCitations);
+                    }
+
+                    // 推送 TOOL_RESULT 事件（携带第一个 citationIndex，前端据此定位本次引用起点）
+                    StepEvent resultEvent = StepEvent.toolResult(i, toolName, toolResult, durationMs, firstCitationIndex);
                     stepEventPublisher.publish(writer, resultEvent);
                     persistStepAsync(sessionId, i, "TOOL_RESULT", toolName, toolResult, (int) durationMs);
 
+                    // 若有引用编号，将编号追加给 LLM，确保最终答案中 [N] 与引用数据一一对应
+                    String toolResultForLlm = toolResult;
+                    if (firstCitationIndex != null) {
+                        if (toolCitations.size() == 1) {
+                            toolResultForLlm = toolResult + "\n【引用编号：[" + firstCitationIndex
+                                    + "]，在最终答案引用此工具数据时请在句末标注 [" + firstCitationIndex + "]】";
+                        } else {
+                            StringBuilder idxHint = new StringBuilder();
+                            for (CitationItem c : toolCitations) {
+                                if (idxHint.length() > 0) idxHint.append(", ");
+                                idxHint.append("[").append(c.getIndex()).append("]");
+                            }
+                            toolResultForLlm = toolResult + "\n【引用编号：" + idxHint
+                                    + "，在最终答案引用此工具各条数据时请在句末标注对应编号】";
+                        }
+                    }
+
                     context.incrementToolCallCount();
                     toolResponses.add(new ToolResponseMessage.ToolResponse(
-                            toolCall.id(), toolName, toolResult));
+                            toolCall.id(), toolName, toolResultForLlm));
                 }
 
                 // 将工具结果加入消息历史
@@ -279,8 +342,10 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             log.error("[AgentOrchestrator] 执行异常 | sessionId={} | error={}", sessionId, e.getMessage(), e);
             stepEventPublisher.publish(writer, StepEvent.error("Agent执行异常: " + e.getMessage()));
             stepEventPublisher.sendDone(writer);
+        } finally {
+            CitationRegistry.cleanup();
         }
-        return finalAnswer;
+        return AgentResult.of(finalAnswer, allCitations);
     }
 
     /**
@@ -465,27 +530,75 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private String buildSystemPrompt(List<Long> datasourceIds, List<String> knowledgeCodes) {
         String dsIds = datasourceIds == null ? resolveAllDatasourceIds()
                 : datasourceIds.isEmpty() ? "（不可用）"
-                : datasourceIds.stream().map(String::valueOf).collect(Collectors.joining(", "));
-        String kbCodes = knowledgeCodes == null ? "（全部）"
+                : resolveDatasourceInfo(datasourceIds);
+        String kbCodes = knowledgeCodes == null ? resolveAllKnowledgeCodes()
                 : knowledgeCodes.isEmpty() ? "（不可用）"
                 : String.join(", ", knowledgeCodes);
         return String.format(SYSTEM_PROMPT_TEMPLATE, dsIds, kbCodes)
                 + "\n当前日期：" + LocalDate.now();
     }
 
+    private String resolveAllKnowledgeCodes() {
+        if (knowledgeDAO == null) return "（全部）";
+        try {
+            List<String> codes = knowledgeDAO.queryKnowledgeList().stream()
+                    .filter(k -> Boolean.TRUE.equals(k.getEnabled()))
+                    .filter(k -> k.getStatus() != null && k.getStatus() != KLState.UNPUBLISHED)
+                    .map(Knowledge::getCode)
+                    .collect(Collectors.toList());
+            return codes.isEmpty() ? "（不可用）"
+                    : String.join(", ", codes);
+        } catch (Exception e) {
+            log.warn("[AgentOrchestrator] 加载全量知识库编码失败，兜底显示全部: {}", e.getMessage());
+            return "（全部）";
+        }
+    }
+
     private String resolveAllDatasourceIds() {
         if (dbDatasourceDAO == null) return "（全部）";
         try {
-            List<Long> ids = dbDatasourceDAO.listAll().stream()
+            List<DbDatasource> list = dbDatasourceDAO.listAll().stream()
                     .filter(ds -> Integer.valueOf(1).equals(ds.getStatus()))
-                    .map(DbDatasource::getId)
                     .collect(Collectors.toList());
-            return ids.isEmpty() ? "（不可用）"
-                    : ids.stream().map(String::valueOf).collect(Collectors.joining(", "));
+            if (list.isEmpty()) return "（不可用）";
+            return list.stream()
+                    .map(this::formatDatasourceEntry)
+                    .collect(Collectors.joining("; "));
         } catch (Exception e) {
             log.warn("[AgentOrchestrator] 加载全量数据源ID失败，兜底显示全部: {}", e.getMessage());
             return "（全部）";
         }
+    }
+
+    private String resolveDatasourceInfo(List<Long> ids) {
+        if (dbDatasourceDAO == null) {
+            return ids.stream().map(String::valueOf).collect(Collectors.joining("; "));
+        }
+        try {
+            Map<Long, DbDatasource> dsMap = dbDatasourceDAO.listAll().stream()
+                    .collect(Collectors.toMap(DbDatasource::getId, ds -> ds, (a, b) -> a));
+            return ids.stream()
+                    .map(id -> {
+                        DbDatasource ds = dsMap.get(id);
+                        return ds != null ? formatDatasourceEntry(ds) : String.valueOf(id);
+                    })
+                    .collect(Collectors.joining("; "));
+        } catch (Exception e) {
+            log.warn("[AgentOrchestrator] 加载数据源名称失败，仅显示ID: {}", e.getMessage());
+            return ids.stream().map(String::valueOf).collect(Collectors.joining("; "));
+        }
+    }
+
+    private String formatDatasourceEntry(DbDatasource ds) {
+        StringBuilder sb = new StringBuilder(String.valueOf(ds.getId()));
+        if (ds.getName() != null && !ds.getName().isBlank()) {
+            sb.append(" (").append(ds.getName());
+            if (ds.getDescription() != null && !ds.getDescription().isBlank()) {
+                sb.append("：").append(ds.getDescription());
+            }
+            sb.append(")");
+        }
+        return sb.toString();
     }
 
     /**

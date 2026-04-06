@@ -35,7 +35,9 @@ public class AskUserTool {
      * @param question 向用户提出的追问内容（简洁、明确、一次只问一个问题）
      * @return 不会被实际返回
      */
-    @Tool(description = "当用户信息不足以完成任务时向用户追问。例如：用户未说明查询规格、时间范围、对象名称等关键条件时使用。每次只追问一个最关键的问题。不要在信息已经足够的情况下追问。")
+    @Tool(description = "当用户提供的信息中连查询主体的大类都没有、完全无法开始任何工具调用时，向用户追问最关键的一个缺失信息。" +
+            "注意：有品类（如'钢筋'）但缺规格时，直接查询，不要触发此工具。时间不明确时默认近3个月，不要触发此工具。" +
+            "每次只追问一个最关键的问题。")
     public String askUser(
             @ToolParam(description = "向用户提出的追问内容，应简洁明确，一次只问一个问题") String question) {
         return question;

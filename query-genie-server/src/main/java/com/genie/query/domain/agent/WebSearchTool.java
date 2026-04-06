@@ -1,7 +1,10 @@
 package com.genie.query.domain.agent;
 
+import com.genie.query.domain.agent.citation.CitationItem;
+import com.genie.query.domain.agent.citation.CitationRegistry;
 import com.genie.query.domain.agent.search.WebSearchProvider;
 import com.genie.query.domain.agent.search.WebSearchResult;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
@@ -62,6 +65,9 @@ public class WebSearchTool {
             }
 
             log.info("[WebSearchTool] 搜索到 {} 条结果", results.size());
+            for (WebSearchResult result : results) {
+                registerCitation(result);
+            }
             return formatResults(results);
 
         } catch (Exception e) {
@@ -70,13 +76,24 @@ public class WebSearchTool {
         }
     }
 
+    private void registerCitation(WebSearchResult r) {
+        CitationItem item = new CitationItem();
+        item.setType(CitationItem.CitationType.WEB);
+        item.setTitle(r.getTitle());
+        item.setUrl(r.getUrl());
+        item.setSnippet(r.getSnippet());
+        item.setSource(r.getSource());
+        item.setPublishedTime(r.getPublishedTime());
+        CitationRegistry.register(item);
+    }
+
     private String formatResults(List<WebSearchResult> results) {
         StringBuilder sb = new StringBuilder();
         sb.append("联网搜索结果（共").append(results.size()).append("条）：\n\n");
 
         for (int i = 0; i < results.size(); i++) {
             WebSearchResult r = results.get(i);
-            sb.append("【结果").append(i + 1).append("】\n");
+            sb.append("【网页结果】\n");
 
             if (r.getTitle() != null && !r.getTitle().isBlank()) {
                 sb.append("标题：").append(r.getTitle()).append("\n");

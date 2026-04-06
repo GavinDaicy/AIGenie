@@ -1,5 +1,7 @@
 package com.genie.query.domain.agent.sql;
 
+import com.genie.query.domain.agent.citation.CitationItem;
+import com.genie.query.domain.agent.citation.CitationRegistry;
 import com.genie.query.domain.schema.dao.DbTableSchemaDAO;
 import com.genie.query.domain.schema.model.DbTableSchema;
 import org.slf4j.Logger;
@@ -9,7 +11,9 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -69,6 +73,7 @@ public class SqlQueryTool {
             @ToolParam(description = "目标数据源ID（单个整数，必填）；如有多个可用数据源且问题涉及多个数据源，请对每个ID分别调用本工具") Long datasourceId) {
         SqlQueryResult result = executeQuery(question, datasourceId);
         if (result.isSuccess() && result.getFormattedText() != null) {
+            registerCitation(result);
             return result.getFormattedText();
         }
         return result.getErrorMessage() != null ? result.getErrorMessage() : "查询未能返回结果";
@@ -132,6 +137,33 @@ public class SqlQueryTool {
 
         log.info("[SqlQueryTool] 查询未成功 | status={} | message={}",
                 result.getStatus(), result.getErrorMessage());
+        return result;
+    }
+
+    private void registerCitation(SqlQueryResult result) {
+        QueryResult qr = result.getQueryResult();
+        CitationItem item = new CitationItem();
+        item.setType(CitationItem.CitationType.SQL);
+        item.setSql(result.getSql());
+        if (qr != null) {
+            item.setColumns(qr.getColumns());
+            item.setRowCount(qr.rowCount());
+            item.setExecutionTimeMs(qr.getExecutionTimeMs());
+            item.setRows(convertRows(qr.getColumns(), qr.getRows()));
+        }
+        CitationRegistry.register(item);
+    }
+
+    private List<List<Object>> convertRows(List<String> columns, List<Map<String, Object>> rawRows) {
+        if (rawRows == null || columns == null) return new ArrayList<>();
+        List<List<Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rawRows) {
+            List<Object> values = new ArrayList<>();
+            for (String col : columns) {
+                values.add(row.get(col));
+            }
+            result.add(values);
+        }
         return result;
     }
 }

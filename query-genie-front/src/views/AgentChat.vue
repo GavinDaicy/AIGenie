@@ -198,21 +198,13 @@
               <!-- 最终答案 -->
               <div v-if="msg.role === 'assistant' && (msg.content || !msg.loading)" class="bubble-content">
                 <span v-if="!msg.content && !msg.loading" class="empty-answer">（无结果）</span>
-                <span v-else v-html="renderContent(msg.content, msg.sources)"></span>
+                <citation-text
+                  v-else
+                  :text="msg.content"
+                  :citations="msg.citations || []"
+                  @cite-click="openCitationDrawer"
+                />
                 <span v-if="msg.streaming" class="cursor-blink">|</span>
-              </div>
-              <!-- Fix2: 来源角标 -->
-              <div v-if="msg.role === 'assistant' && msg.sources && msg.sources.length && !msg.loading" class="answer-sources">
-                <span class="sources-label">参考来源：</span>
-                <a
-                  v-for="s in msg.sources"
-                  :key="s.index"
-                  :href="s.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  :title="s.url"
-                  class="source-badge"
-                >{{ s.index }}</a>
               </div>
             </div>
             <div v-if="msg.role === 'user'" class="avatar avatar-me">我</div>
@@ -272,6 +264,11 @@
       @click="toggleSidebar" @keydown.enter="toggleSidebar">
       <i class="el-icon-arrow-right" />
     </div>
+    <citation-drawer
+      v-if="citationDrawerVisible"
+      :visible.sync="citationDrawerVisible"
+      :citation="activeCitation"
+    />
   </div>
 </template>
 
@@ -280,9 +277,12 @@ import { agentAskStream } from '@/api/agent'
 import { getKnowledgeList } from '@/api/knowledge'
 import { listDatasources } from '@/api/schema'
 import { createSession, listSessions, getSession, deleteSession } from '@/api/session'
+import CitationText from '@/components/CitationText.vue'
+import CitationDrawer from '@/components/CitationDrawer.vue'
 
 export default {
   name: 'AgentChat',
+  components: { CitationText, CitationDrawer },
   computed: {
     currentSessionTitle() {
       const s = this.sessions.find(x => x.id === this.currentSessionId)
@@ -309,7 +309,9 @@ export default {
         datasourceIds: []
       },
       agentLoading: false,
-      abortFn: null
+      abortFn: null,
+      citationDrawerVisible: false,
+      activeCitation: null
     }
   },
   created() {
@@ -402,6 +404,8 @@ export default {
         const detail = await getSession(id)
         this.messages = (detail.messages || []).map(m => ({
           ...m,
+          citations: m.citations || [],
+          sources: m.sources || [],
           steps: m.steps || [],
           stepsExpanded: m.steps && m.steps.length ? [] : ['steps'],
           loading: false,
@@ -452,14 +456,13 @@ export default {
         stepsExpanded: ['steps'],
         loading: true,
         streaming: false,
-        // Fix3: Vue2 响应式要求提前声明所有字段
         isWaitingForUser: false,
         askUserQuestion: '',
         askUserReply: '',
         askUserAnswered: false,
         askUserAnsweredText: '',
-        // Fix2: 来源 URL 列表
-        sources: []
+        sources: [],
+        citations: []
       })
       this.$nextTick(() => this.scrollToBottom())
 
@@ -475,7 +478,9 @@ export default {
           const msg = this.messages.find(m => m.id === assistantId)
           if (!msg) return
 
-          if (event.type === 'FINAL_ANSWER') {
+          if (event.type === 'CITATIONS') {
+            msg.citations = event.citations || []
+          } else if (event.type === 'FINAL_ANSWER') {
             // 最终答案：将正在流式输出的 THOUGHT 标记为完成
             msg.steps.forEach(s => { if (s._streaming) s._streaming = false })
             msg.loading = false
@@ -513,15 +518,6 @@ export default {
             // 工具调用/返回：标记当前轮思考完成
             msg.steps.forEach(s => { if (s._streaming && s.iteration === event.iteration) s._streaming = false })
             msg.steps.push(event)
-            // Fix2: 收集 searchWeb 返回的来源 URL
-            if (event.type === 'TOOL_RESULT' && event.toolName === 'searchWeb') {
-              const urls = this.extractUrls(event.content || '')
-              urls.forEach(url => {
-                if (!msg.sources.find(s => s.url === url)) {
-                  msg.sources.push({ index: msg.sources.length + 1, url })
-                }
-              })
-            }
           } else {
             msg.steps.push(event)
           }
@@ -592,29 +588,9 @@ export default {
       this.inputQuestion = reply
       this.handleSend()
     },
-    renderContent(content, sources) {
-      if (!content) return ''
-      let html = content
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-      if (sources && sources.length) {
-        sources.forEach(s => {
-          const re = new RegExp(`\\[${s.index}\\]`, 'g')
-          const safeUrl = (s.url || '').replace(/"/g, '&quot;')
-          html = html.replace(re,
-            `<sup><a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="citation-link">[${s.index}]</a></sup>`)
-        })
-      }
-      html = html.replace(/\n/g, '<br>')
-      return html
-    },
-    extractUrls(text) {
-      if (!text) return []
-      const urlRegex = /https?:\/\/[^\s\u3000-\uffff"'<>）。，、！？]+/g
-      const matches = text.match(urlRegex) || []
-      return [...new Set(matches)].slice(0, 10)
+    openCitationDrawer(citation) {
+      this.activeCitation = citation
+      this.citationDrawerVisible = true
     },
     onInputKeydown(e) {
       if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); this.handleSend() }
@@ -625,6 +601,11 @@ export default {
     },
     formatJson(str) {
       try { return JSON.stringify(JSON.parse(str), null, 2) } catch (_) { return str }
+    },
+    extractUrls(text) {
+      if (!text) return []
+      const urlRegex = /(https?:\/\/[^\s"'<>]+)/g
+      return [...new Set(text.match(urlRegex) || [])]
     },
     truncate(str, len) {
       if (!str) return ''

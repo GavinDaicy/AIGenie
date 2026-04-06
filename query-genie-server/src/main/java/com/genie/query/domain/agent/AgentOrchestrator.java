@@ -21,9 +21,9 @@ public interface AgentOrchestrator {
      * @param knowledgeCodes 可访问的知识库编码列表
      * @param datasourceIds  可访问的数据源 ID 列表
      * @param writer         响应流写入器（由 AgentController 从 HttpServletResponse 获取）
-     * @return 最终答案文本（供调用方持久化），若未产生答案则返回 null
+     * @return 执行结果（含最终答案文本和本轮引用数据），追问暂停时 finalAnswer 为 null
      */
-    String execute(String question, String sessionId,
-                   List<String> knowledgeCodes, List<Long> datasourceIds,
-                   PrintWriter writer);
+    AgentResult execute(String question, String sessionId,
+                        List<String> knowledgeCodes, List<Long> datasourceIds,
+                        PrintWriter writer);
 }

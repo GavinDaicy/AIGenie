@@ -1,5 +1,5 @@
 -- Active: 1769914246591@@127.0.0.1@3306@genie
-CREATE DATABASE IF NOT EXISTS `genie`;
+CREATE DATABASE IF NOT EXISTS `genie` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 USE `genie`;
 
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS `genie`.`knowledge` (
   `create_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`)
-)ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='知识库表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT='知识库表';
 
 CREATE INDEX idx_knowledge_code ON `genie`.`knowledge` (`code`);
 CREATE INDEX idx_knowledge_name ON `genie`.`knowledge` (`name`);
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS `genie`.`kl_field` (
   `sortable` INT(1) NOT NULL DEFAULT 0 COMMENT '字段是否可排序: 0(不可排序) 1(可排序)',
   `ord` INT(11) NOT NULL DEFAULT 0 COMMENT '字段排序',
   PRIMARY KEY (`id`)
-)ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='知识库字段表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT='知识库字段表';
 
 CREATE INDEX idx_kl_field_knowledge_id ON `genie`.`kl_field` (`knowledge_id`);
 
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS `genie`.`document` (
   `create_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`)
-)ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='文档记录表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT='文档记录表';
 
 CREATE INDEX idx_document_name ON `genie`.`document` (`name`);
 
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS `genie`.`chat_session` (
   `create_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='智能问答会话表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT='智能问答会话表';
 
 CREATE INDEX idx_chat_session_update_time ON `genie`.`chat_session` (`update_time`);
 
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS `genie`.`chat_message` (
   `sort_order` INT NOT NULL DEFAULT 0 COMMENT '排序序号',
   `create_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='智能问答消息表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT='智能问答消息表';
 
 CREATE INDEX idx_chat_message_session_id ON `genie`.`chat_message` (`session_id`);
 CREATE INDEX idx_chat_message_session_sort ON `genie`.`chat_message` (`session_id`, `sort_order`);

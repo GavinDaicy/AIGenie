@@ -1,13 +1,17 @@
 package com.genie.query.application;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.genie.query.controller.dto.AgentAskRequest;
 import com.genie.query.domain.agent.AgentOrchestrator;
+import com.genie.query.domain.agent.AgentResult;
 import com.genie.query.domain.agent.QuestionType;
 import com.genie.query.domain.agent.SemanticRouter;
 import com.genie.query.domain.agent.StepEvent;
 import com.genie.query.domain.agent.StepEventPublisher;
 import com.genie.query.domain.chat.dao.ChatMessageDAO;
 import com.genie.query.domain.chat.model.ChatMessage;
+
+import org.apache.commons.collections4.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +53,8 @@ public class AgentApplication {
     @Autowired(required = false)
     private SessionApplication sessionApplication;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     private String buildRoutingLabel(QuestionType type) {
         switch (type) {
             case DATA_QUERY: return "数据查询";
@@ -68,6 +74,10 @@ public class AgentApplication {
         String sessionId = request.getSessionId();
         List<String> knowledgeCodes = request.getKnowledgeCodes();
         List<Long> datasourceIds = request.getDatasourceIds();
+
+        // null代表查全部，empty代表不查询，前端传空，默认查全部，禁用是由后端处理的规则
+        knowledgeCodes = CollectionUtils.isEmpty(knowledgeCodes) ? null : knowledgeCodes;
+        datasourceIds = CollectionUtils.isEmpty(datasourceIds) ? null : datasourceIds;
 
         // 语义路由分类：先推送"识别中"状态
         stepEventPublisher.publish(writer, StepEvent.planning("正在识别问题意图…"));
@@ -93,9 +103,9 @@ public class AgentApplication {
         }
 
         // 执行 Agent
-        String finalAnswer = null;
+        AgentResult agentResult = null;
         try {
-            finalAnswer = agentOrchestrator.execute(
+            agentResult = agentOrchestrator.execute(
                     question, sessionId,
                     effectiveKnowledgeCodes, effectiveDatasourceIds,
                     writer);
@@ -104,6 +114,7 @@ public class AgentApplication {
             stepEventPublisher.publish(writer, StepEvent.error("系统错误: " + e.getMessage()));
             stepEventPublisher.sendDone(writer);
         }
+        String finalAnswer = agentResult != null ? agentResult.getFinalAnswer() : null;
 
         // 持久化用户消息（无论是否有最终答案，user 消息均落库）
         if (sessionId != null && chatMessageDAO != null) {
@@ -131,6 +142,14 @@ public class AgentApplication {
                     assistantMsg.setContent(finalAnswer);
                     assistantMsg.setSortOrder(nextOrder + 1);
                     assistantMsg.setSources("[]");
+                    if (agentResult != null && !agentResult.getCitations().isEmpty()) {
+                        try {
+                            assistantMsg.setCitationsJson(
+                                    objectMapper.writeValueAsString(agentResult.getCitations()));
+                        } catch (Exception jsonEx) {
+                            log.warn("[AgentApplication] citations 序列化失败 | error={}", jsonEx.getMessage());
+                        }
+                    }
                     chatMessageDAO.insert(assistantMsg);
                     log.info("[AgentApplication] 对话已落库 | sessionId={}", sessionId);
                 } else {
