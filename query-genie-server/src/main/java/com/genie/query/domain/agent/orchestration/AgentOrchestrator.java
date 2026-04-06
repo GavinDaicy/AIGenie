@@ -1,5 +1,7 @@
 package com.genie.query.domain.agent.orchestration;
 
+import com.genie.query.controller.dto.AgentAskRequest;
+
 import java.io.PrintWriter;
 import java.util.List;
 
@@ -20,10 +22,12 @@ public interface AgentOrchestrator {
      * @param sessionId      会话 ID（携带历史上下文）
      * @param knowledgeCodes 可访问的知识库编码列表
      * @param datasourceIds  可访问的数据源 ID 列表
+     * @param toolForce      工具强制控制（null 表示跟随自动路由）
      * @param writer         响应流写入器（由 AgentController 从 HttpServletResponse 获取）
      * @return 执行结果（含最终答案文本和本轮引用数据），追问暂停时 finalAnswer 为 null
      */
     AgentResult execute(String question, String sessionId,
                         List<String> knowledgeCodes, List<Long> datasourceIds,
+                        AgentAskRequest.ToolForce toolForce,
                         PrintWriter writer);
 }

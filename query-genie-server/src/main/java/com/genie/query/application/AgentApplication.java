@@ -74,6 +74,7 @@ public class AgentApplication {
         String sessionId = request.getSessionId();
         List<String> knowledgeCodes = request.getKnowledgeCodes();
         List<Long> datasourceIds = request.getDatasourceIds();
+        AgentAskRequest.ToolForce toolForce = request.getToolForce();
 
         // null代表查全部，empty代表不查询，前端传空，默认查全部，禁用是由后端处理的规则
         knowledgeCodes = CollectionUtils.isEmpty(knowledgeCodes) ? null : knowledgeCodes;
@@ -102,12 +103,33 @@ public class AgentApplication {
             effectiveKnowledgeCodes = List.of(); // DATA_QUERY 路由不开放知识库
         }
 
+        // toolForce 覆盖（优先级高于路由结果）
+        if (toolForce != null) {
+            if (Boolean.FALSE.equals(toolForce.getSql())) {
+                // 强制禁用 SQL：清空数据源列表
+                effectiveDatasourceIds = List.of();
+            } else if (Boolean.TRUE.equals(toolForce.getSql()) && CollectionUtils.isEmpty(effectiveDatasourceIds)) {
+                // 强制启用 SQL：路由屏蔽了数据源时恢复为 null（使用全部）
+                effectiveDatasourceIds = null;
+            }
+            if (Boolean.FALSE.equals(toolForce.getKnowledge())) {
+                // 强制禁用知识库：清空知识库列表
+                effectiveKnowledgeCodes = List.of();
+            } else if (Boolean.TRUE.equals(toolForce.getKnowledge()) && CollectionUtils.isEmpty(effectiveKnowledgeCodes)) {
+                // 强制启用知识库：路由屏蔽了知识库时恢复为 null（使用全部）
+                effectiveKnowledgeCodes = null;
+            }
+            log.info("[AgentApplication] toolForce 覆盖已应用 | web={} knowledge={} sql={}",
+                    toolForce.getWebSearch(), toolForce.getKnowledge(), toolForce.getSql());
+        }
+
         // 执行 Agent
         AgentResult agentResult = null;
         try {
             agentResult = agentOrchestrator.execute(
                     question, sessionId,
                     effectiveKnowledgeCodes, effectiveDatasourceIds,
+                    toolForce,
                     writer);
         } catch (Exception e) {
             log.error("[AgentApplication] Agent执行异常 | error={}", e.getMessage(), e);

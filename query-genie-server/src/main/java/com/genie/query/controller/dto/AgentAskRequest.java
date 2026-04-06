@@ -24,4 +24,20 @@ public class AgentAskRequest {
 
     /** 可访问的数据源 ID 列表（可选，为空则不使用 SQL 工具） */
     private List<Long> datasourceIds;
+
+    /** 工具强制控制（可选，用于对比测试不同工具组合的效果） */
+    private ToolForce toolForce;
+
+    /**
+     * 工具强制控制开关：true=强制调用，false=强制禁用，null=跟随自动路由。
+     */
+    @Data
+    public static class ToolForce {
+        /** 联网搜索（searchWeb）：true=强制调用，false=强制禁用 */
+        private Boolean webSearch;
+        /** 知识库检索（searchKnowledge）：true=强制调用，false=强制禁用 */
+        private Boolean knowledge;
+        /** SQL检索（querySql）：true=强制调用，false=强制禁用 */
+        private Boolean sql;
+    }
 }

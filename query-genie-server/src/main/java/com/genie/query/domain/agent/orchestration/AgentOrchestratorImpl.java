@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import com.genie.query.controller.dto.AgentAskRequest;
 import com.genie.query.domain.cache.CacheService;
 
 /**
@@ -194,6 +195,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     @Override
     public AgentResult execute(String question, String sessionId,
                                List<String> knowledgeCodes, List<Long> datasourceIds,
+                               AgentAskRequest.ToolForce toolForce,
                                PrintWriter writer) {
 
         AgentContext context = new AgentContext(sessionId, question, knowledgeCodes, datasourceIds);
@@ -202,14 +204,14 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         List<CitationItem> allCitations = new ArrayList<>();
 
         try {
-            // 初始化工具 Callback
-            Object[] tools = new Object[]{sqlQueryTool, ragSearchTool, webSearchTool, askUserTool};
-            ToolCallback[] toolCallbacks = ToolCallbacks.from(tools);
+            // 初始化工具 Callback（根据 toolForce 动态过滤被禁用的工具）
+            List<Object> toolList = buildToolList(toolForce, datasourceIds, knowledgeCodes);
+            ToolCallback[] toolCallbacks = ToolCallbacks.from(toolList.toArray());
             Map<String, ToolCallback> callbackMap = Arrays.stream(toolCallbacks)
                     .collect(Collectors.toMap(cb -> cb.getToolDefinition().name(), cb -> cb));
 
             // 初始化消息历史
-            String systemPrompt = buildSystemPrompt(datasourceIds, knowledgeCodes);
+            String systemPrompt = buildSystemPrompt(datasourceIds, knowledgeCodes, toolForce);
             context.addMessage(new SystemMessage(systemPrompt));
 
             // 检查是否为 askUser 续跑：若有暂停前的工具结果，注入为上下文避免 LLM 重复执行
@@ -562,15 +564,88 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         return sb.toString();
     }
 
-    private String buildSystemPrompt(List<Long> datasourceIds, List<String> knowledgeCodes) {
+    private String buildSystemPrompt(List<Long> datasourceIds, List<String> knowledgeCodes,
+                                     AgentAskRequest.ToolForce toolForce) {
         String dsIds = datasourceIds == null ? resolveAllDatasourceIds()
                 : datasourceIds.isEmpty() ? "（不可用）"
                 : resolveDatasourceInfo(datasourceIds);
         String kbCodes = knowledgeCodes == null ? resolveAllKnowledgeCodes()
                 : knowledgeCodes.isEmpty() ? "（不可用）"
                 : String.join(", ", knowledgeCodes);
-        return String.format(SYSTEM_PROMPT_TEMPLATE, dsIds, kbCodes)
-                + "\n当前日期：" + LocalDate.now();
+        StringBuilder prompt = new StringBuilder(String.format(SYSTEM_PROMPT_TEMPLATE, dsIds, kbCodes))
+                .append("\n当前日期：").append(LocalDate.now());
+        // 追加 toolForce 强制约束指令（最高优先级，覆盖上方所有工具选择规则）
+        String forceSection = buildToolForceSection(toolForce);
+        if (forceSection != null) {
+            prompt.append("\n\n").append(forceSection);
+        }
+        return prompt.toString();
+    }
+
+    /**
+     * 根据 toolForce 生成强制约束 System Prompt 附加段。
+     * 强制启用时通过 Prompt 驱动 LLM 主动调用工具；强制禁用时通过 Prompt 明确禁止（配合 toolCallbacks 过滤双重保障）。
+     */
+    private String buildToolForceSection(AgentAskRequest.ToolForce toolForce) {
+        if (toolForce == null) return null;
+        boolean hasAnyForce = toolForce.getWebSearch() != null
+                || toolForce.getKnowledge() != null
+                || toolForce.getSql() != null;
+        if (!hasAnyForce) return null;
+
+        StringBuilder sb = new StringBuilder("## 本次强制工具约束（最高优先级，覆盖上方所有工具选择规则）\n");
+        if (Boolean.TRUE.equals(toolForce.getSql())) {
+            sb.append("- 【强制调用】querySql：无论问题类型，**必须**调用此工具查询数据库\n");
+        } else if (Boolean.FALSE.equals(toolForce.getSql())) {
+            sb.append("- 【严格禁止】querySql：**禁止**调用此工具，即使问题涉及数据统计\n");
+        }
+        if (Boolean.TRUE.equals(toolForce.getKnowledge())) {
+            sb.append("- 【强制调用】searchKnowledge：无论问题类型，**必须**调用此工具检索知识库\n");
+        } else if (Boolean.FALSE.equals(toolForce.getKnowledge())) {
+            sb.append("- 【严格禁止】searchKnowledge：**禁止**调用此工具，即使问题涉及知识文档\n");
+        }
+        if (Boolean.TRUE.equals(toolForce.getWebSearch())) {
+            sb.append("- 【强制调用】searchWeb：无论问题类型，**必须**调用此工具搜索互联网\n");
+        } else if (Boolean.FALSE.equals(toolForce.getWebSearch())) {
+            sb.append("- 【严格禁止】searchWeb：**禁止**调用此工具，不得进行联网搜索\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 根据 toolForce 动态组装工具列表：被强制禁用的工具从 toolCallbacks 中移除，
+     * LLM 将看不到该工具的定义，彻底避免误调用。
+     */
+    private List<Object> buildToolList(AgentAskRequest.ToolForce toolForce,
+                                       List<Long> datasourceIds,
+                                       List<String> knowledgeCodes) {
+        List<Object> tools = new ArrayList<>();
+        tools.add(askUserTool); // askUser 始终保留
+
+        // SQL 工具：toolForce 未明确禁用 且 数据源不为空列表 时加入
+        boolean sqlEnabled = !Boolean.FALSE.equals(toolForce == null ? null : toolForce.getSql())
+                && !(datasourceIds != null && datasourceIds.isEmpty());
+        if (sqlEnabled) {
+            tools.add(sqlQueryTool);
+        }
+
+        // 知识库工具：toolForce 未明确禁用 且 知识库编码不为空列表 时加入
+        boolean kbEnabled = !Boolean.FALSE.equals(toolForce == null ? null : toolForce.getKnowledge())
+                && !(knowledgeCodes != null && knowledgeCodes.isEmpty());
+        if (kbEnabled) {
+            tools.add(ragSearchTool);
+        }
+
+        // 联网搜索：toolForce 未明确禁用 且 webSearchTool 可用时加入
+        boolean webEnabled = !Boolean.FALSE.equals(toolForce == null ? null : toolForce.getWebSearch())
+                && webSearchTool != null;
+        if (webEnabled) {
+            tools.add(webSearchTool);
+        }
+
+        log.info("[AgentOrchestrator] 工具列表 | sql={} kb={} web={} | toolForce={}",
+                sqlEnabled, kbEnabled, webEnabled, toolForce);
+        return tools;
     }
 
     private String resolveAllKnowledgeCodes() {

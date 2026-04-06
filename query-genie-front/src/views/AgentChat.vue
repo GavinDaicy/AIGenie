@@ -211,6 +211,38 @@
           </div>
         </div>
 
+        <!-- 工具强制控制栏（三态：关/自动/开） -->
+        <div class="tool-force-bar">
+          <span class="tool-force-label">🔧 工具控制</span>
+
+          <div class="tool-force-item">
+            <span class="tool-force-item-label">🌐 联网搜索</span>
+            <div class="tri-toggle">
+              <button :class="['tri-btn', 'tri-btn-off', { active: toolForce.webSearch === false }]" @click="toolForce.webSearch = false">关</button>
+              <button :class="['tri-btn', 'tri-btn-auto', { active: toolForce.webSearch === null }]" @click="toolForce.webSearch = null">自动</button>
+              <button :class="['tri-btn', 'tri-btn-on', { active: toolForce.webSearch === true }]" @click="toolForce.webSearch = true">开</button>
+            </div>
+          </div>
+
+          <div class="tool-force-item">
+            <span class="tool-force-item-label">📚 知识库</span>
+            <div class="tri-toggle">
+              <button :class="['tri-btn', 'tri-btn-off', { active: toolForce.knowledge === false }]" @click="toolForce.knowledge = false">关</button>
+              <button :class="['tri-btn', 'tri-btn-auto', { active: toolForce.knowledge === null }]" @click="toolForce.knowledge = null">自动</button>
+              <button :class="['tri-btn', 'tri-btn-on', { active: toolForce.knowledge === true }]" @click="toolForce.knowledge = true">开</button>
+            </div>
+          </div>
+
+          <div class="tool-force-item">
+            <span class="tool-force-item-label">🗃️ SQL检索</span>
+            <div class="tri-toggle">
+              <button :class="['tri-btn', 'tri-btn-off', { active: toolForce.sql === false }]" @click="toolForce.sql = false">关</button>
+              <button :class="['tri-btn', 'tri-btn-auto', { active: toolForce.sql === null }]" @click="toolForce.sql = null">自动</button>
+              <button :class="['tri-btn', 'tri-btn-on', { active: toolForce.sql === true }]" @click="toolForce.sql = true">开</button>
+            </div>
+          </div>
+        </div>
+
         <!-- 输入区 -->
         <div class="chat-input-wrap">
           <div class="composer">
@@ -311,7 +343,12 @@ export default {
       agentLoading: false,
       abortFn: null,
       citationDrawerVisible: false,
-      activeCitation: null
+      activeCitation: null,
+      toolForce: {
+        webSearch: null,
+        knowledge: null,
+        sql: null
+      }
     }
   },
   created() {
@@ -470,7 +507,8 @@ export default {
         question,
         sessionId: this.currentSessionId,
         knowledgeCodes: this.agentForm.knowledgeCodes.length ? this.agentForm.knowledgeCodes : undefined,
-        datasourceIds: this.agentForm.datasourceIds.length ? this.agentForm.datasourceIds : undefined
+        datasourceIds: this.agentForm.datasourceIds.length ? this.agentForm.datasourceIds : undefined,
+        toolForce: this.toolForce
       }
 
       this.abortFn = agentAskStream(params, {
@@ -1155,6 +1193,74 @@ export default {
   font-weight: 600;
   color: #f59e0b;
   margin-right: 4px;
+}
+
+/* 工具强制控制栏 */
+.tool-force-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 18px;
+  background: var(--qg-bg-card);
+  border-top: 1px solid var(--qg-border-subtle);
+  flex-wrap: wrap;
+}
+.tool-force-label {
+  font-size: 12px;
+  color: var(--qg-text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tool-force-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tool-force-item-label {
+  font-size: 12px;
+  color: var(--qg-text-secondary);
+  white-space: nowrap;
+}
+/* 三态切换组 */
+.tri-toggle {
+  display: inline-flex;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--qg-border-subtle);
+}
+.tri-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border: none;
+  background: var(--qg-bg-card-soft);
+  color: var(--qg-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  outline: none;
+  line-height: 1.6;
+  &:not(:last-child) {
+    border-right: 1px solid var(--qg-border-subtle);
+  }
+  &:hover:not(.active) {
+    background: var(--qg-bg-hover, #f3f4f6);
+    color: var(--qg-text-primary);
+  }
+}
+.tri-btn-off.active {
+  background: #fee2e2;
+  color: #dc2626;
+  font-weight: 600;
+}
+.tri-btn-auto.active {
+  background: #ede9fe;
+  color: #7c3aed;
+  font-weight: 600;
+}
+.tri-btn-on.active {
+  background: #d1fae5;
+  color: #059669;
+  font-weight: 600;
 }
 
 /* 输入区 */
