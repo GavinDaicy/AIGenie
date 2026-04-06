@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.genie.query.infrastructure.dao.mysql.mapper.AgentFeedbackMapper">
+
+    <insert id="insert" parameterType="com.genie.query.domain.agent.model.AgentFeedback">
+        insert into agent_feedback (id, message_id, session_id, rating, comment, created_at)
+        values (#{id}, #{messageId}, #{sessionId}, #{rating}, #{comment}, #{createdAt})
+    </insert>
+
+    <select id="findByMessageId" resultType="com.genie.query.domain.agent.model.AgentFeedback">
+        select * from agent_feedback where message_id = #{messageId} limit 1
+    </select>
+
+    <select id="listLowRating" resultType="com.genie.query.domain.agent.model.AgentFeedback">
+        select * from agent_feedback
+        where rating &lt;= #{rating}
+        order by created_at desc
+        limit #{limit}
+    </select>
+
+</mapper>

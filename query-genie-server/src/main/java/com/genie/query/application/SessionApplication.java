@@ -5,6 +5,7 @@ import com.genie.query.controller.dto.MessageItem;
 import com.genie.query.controller.dto.QaSourceItem;
 import com.genie.query.controller.dto.SessionDetail;
 import com.genie.query.controller.dto.SessionListItem;
+import com.genie.query.domain.agent.citation.CitationItem;
 import com.genie.query.domain.chat.dao.ChatMessageDAO;
 import com.genie.query.domain.chat.dao.ChatSessionDAO;
 import com.genie.query.domain.chat.model.ChatMessage;
@@ -89,11 +90,13 @@ public class SessionApplication {
         List<MessageItem> messageItems = new ArrayList<>();
         for (ChatMessage m : messages) {
             List<QaSourceItem> sources = parseSources(m.getSources());
+            List<CitationItem> citations = parseCitations(m.getCitationsJson(), sources);
             messageItems.add(MessageItem.builder()
                     .id(m.getId())
                     .role(m.getRole())
                     .content(m.getContent())
                     .sources(sources)
+                    .citations(citations)
                     .build());
         }
         return SessionDetail.builder()
@@ -136,5 +139,35 @@ public class SessionApplication {
         } catch (Exception e) {
             return Collections.emptyList();
         }
+    }
+
+    /**
+     * 解析 citations_json；若为空且 sources 非空（QA 旧消息），将 sources 转换为 CitationItem[] 兼容返回。
+     */
+    private List<CitationItem> parseCitations(String citationsJson, List<QaSourceItem> sources) {
+        if (!StringUtils.isBlank(citationsJson)) {
+            try {
+                return objectMapper.readValue(citationsJson, new TypeReference<List<CitationItem>>() {});
+            } catch (Exception e) {
+                return Collections.emptyList();
+            }
+        }
+        // 兼容转换：QA 旧消息的 sources 转为 CitationItem[] (type=KB)
+        if (sources == null || sources.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<CitationItem> result = new ArrayList<>();
+        for (int i = 0; i < sources.size(); i++) {
+            QaSourceItem s = sources.get(i);
+            CitationItem item = new CitationItem();
+            item.setIndex(i + 1);
+            item.setType(CitationItem.CitationType.KB);
+            item.setKnowledgeCode(s.getKnowledgeCode());
+            item.setScore(s.getScore());
+            item.setDocumentName(s.getDocumentName());
+            item.setChunkContent(s.getChunkContent());
+            result.add(item);
+        }
+        return result;
     }
 }

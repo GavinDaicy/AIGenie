@@ -3,8 +3,8 @@
 <mapper namespace="com.genie.query.infrastructure.dao.mysql.mapper.ChatSessionMapper">
 
     <insert id="insert" parameterType="com.genie.query.domain.chat.model.ChatSession">
-        insert into chat_session (id, title, knowledge_codes, create_time, update_time)
-        values (#{id}, #{title}, #{knowledgeCodes}, #{createTime}, #{updateTime})
+        insert into chat_session (id, title, knowledge_codes, mode, create_time, update_time)
+        values (#{id}, #{title}, #{knowledgeCodes}, #{mode}, #{createTime}, #{updateTime})
     </insert>
 
     <select id="findById" resultType="com.genie.query.domain.chat.model.ChatSession">

@@ -125,17 +125,11 @@
                 </div>
               </div>
               <div v-else class="bubble-content">
-                <template v-for="(seg, idx) in parseAnswerWithCitations(msg.content)">
-                  <span v-if="seg.type === 'text'" :key="idx">{{ seg.text }}</span>
-                  <sup
-                    v-else
-                    :key="'c-' + idx"
-                    class="qa-citation"
-                    @click="handleMessageCitationClick(msg, seg.index)"
-                  >
-                    [{{ seg.index }}]
-                  </sup>
-                </template>
+                <citation-text
+                  :text="msg.content"
+                  :citations="getMsgCitations(msg)"
+                  @cite-click="openCitationDrawer"
+                />
               </div>
               <div v-if="msg.role === 'assistant' && msg.rewrittenQueries && msg.rewrittenQueries.length && (msg.content || !qaLoading)" class="bubble-rewritten">
                 <el-collapse>
@@ -161,7 +155,7 @@
                           <el-tag size="small">{{ item.knowledgeCode }}</el-tag>
                           <span class="score">相关度: {{ (item.score || 0).toFixed(4) }}</span>
                           <span v-if="item.documentName" class="doc-name">{{ item.documentName }}</span>
-                          <el-button type="text" class="source-link" @click="openSourceDrawer(item)">查看详情</el-button>
+                          <el-button type="text" class="source-link" @click="openCitationDrawer(sourceToCitation(item, idx))">查看详情</el-button>
                         </div>
                         <div class="source-content">
                           <template v-if="item.chunkContent && Object.keys(item.chunkContent).length">
@@ -250,39 +244,10 @@
     >
       <i class="el-icon-arrow-right" aria-hidden="true" />
     </div>
-    <el-drawer
-      title="引用来源详情"
+    <citation-drawer
       :visible.sync="showSourceDrawer"
-      size="560px"
-      direction="rtl"
-    >
-      <div class="source-drawer-body">
-        <div v-if="activeSource">
-          <div class="source-drawer-meta">
-            <el-tag size="small">{{ activeSource.knowledgeCode }}</el-tag>
-            <span class="score">相关度: {{ (activeSource.score || 0).toFixed(4) }}</span>
-            <span v-if="activeSource.documentName" class="doc-name">{{ activeSource.documentName }}</span>
-          </div>
-          <div class="source-content">
-            <template v-if="activeSource.chunkContent && Object.keys(activeSource.chunkContent).length">
-              <div
-                v-for="(val, key) in activeSource.chunkContent"
-                v-show="val != null && val !== ''"
-                :key="key"
-                class="chunk-field"
-              >
-                <span class="field-key">{{ key }}:</span>
-                <span class="field-val">{{ formatChunkValue(val) }}</span>
-              </div>
-            </template>
-            <span v-else class="no-content">无分块内容</span>
-          </div>
-        </div>
-        <div v-else>
-          未找到来源详情。
-        </div>
-      </div>
-    </el-drawer>
+      :citation="activeCitation"
+    />
   <el-drawer
     title="问答参数设置"
     :visible.sync="showSettingsDrawer"
@@ -322,9 +287,12 @@
 import { getKnowledgeList } from '@/api/knowledge'
 import { createSession, listSessions, getSession, deleteSession } from '@/api/session'
 import { ask, askStream } from '@/api/qa'
+import CitationText from '@/components/CitationText.vue'
+import CitationDrawer from '@/components/CitationDrawer.vue'
 
 export default {
   name: 'Qa',
+  components: { CitationText, CitationDrawer },
   computed: {
     currentSessionTitle() {
       const s = this.sessions.find(x => x.id === this.currentSessionId)
@@ -357,7 +325,8 @@ export default {
       qaLoading: false,
       showSettingsDrawer: false,
       showSourceDrawer: false,
-      activeSource: null
+      activeSource: null,
+      activeCitation: null
     }
   },
   created() {
@@ -650,20 +619,27 @@ export default {
       }
       return segments
     },
-    handleMessageCitationClick(msg, index) {
-      if (!index || !msg || !Array.isArray(msg.sources) || !msg.sources.length) {
-        this.$message && this.$message.warning('未找到对应来源')
-        return
+    getMsgCitations(msg) {
+      if (msg.citations && msg.citations.length) return msg.citations
+      if (!msg.sources || !msg.sources.length) return []
+      return msg.sources.map((s, i) => this.sourceToCitation(s, i))
+    },
+    sourceToCitation(item, idx) {
+      return {
+        index: idx + 1,
+        type: 'KB',
+        knowledgeCode: item.knowledgeCode,
+        score: item.score,
+        documentName: item.documentName,
+        chunkContent: item.chunkContent
       }
-      const source = msg.sources[index - 1]
-      if (!source) {
-        this.$message && this.$message.warning('未找到对应来源')
-        return
-      }
-      this.openSourceDrawer(source)
+    },
+    openCitationDrawer(citation) {
+      this.activeCitation = citation
+      this.showSourceDrawer = true
     },
     openSourceDrawer(source) {
-      this.activeSource = source
+      this.activeCitation = this.sourceToCitation(source, (source.index || 1) - 1)
       this.showSourceDrawer = true
     }
   }

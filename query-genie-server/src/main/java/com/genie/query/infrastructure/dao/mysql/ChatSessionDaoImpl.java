@@ -27,6 +27,9 @@ public class ChatSessionDaoImpl implements ChatSessionDAO {
         if (session.getId() == null) {
             session.setId(SnowflakeIdUtils.getNextStringId());
         }
+        if (session.getMode() == null) {
+            session.setMode("RAG");
+        }
         if (session.getCreateTime() == null) {
             session.setCreateTime(new Date());
         }

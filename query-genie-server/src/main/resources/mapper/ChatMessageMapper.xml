@@ -3,8 +3,8 @@
 <mapper namespace="com.genie.query.infrastructure.dao.mysql.mapper.ChatMessageMapper">
 
     <insert id="insert" parameterType="com.genie.query.domain.chat.model.ChatMessage">
-        insert into chat_message (id, session_id, role, content, sources, sort_order, create_time)
-        values (#{id}, #{sessionId}, #{role}, #{content}, #{sources}, #{sortOrder}, #{createTime})
+        insert into chat_message (id, session_id, role, content, sources, citations_json, sort_order, create_time)
+        values (#{id}, #{sessionId}, #{role}, #{content}, #{sources}, #{citationsJson}, #{sortOrder}, #{createTime})
     </insert>
 
     <select id="listBySessionIdOrderBySortOrder" resultType="com.genie.query.domain.chat.model.ChatMessage">

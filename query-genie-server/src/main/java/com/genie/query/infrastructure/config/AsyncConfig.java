@@ -21,9 +21,22 @@ import java.util.concurrent.ThreadPoolExecutor;
 public class AsyncConfig {
 
     /**
-     * 文档处理专用线程池（解析、切块、向量化）。
-     * 线程名前缀便于排查问题，队列容量和拒绝策略可后续按需调整。
+     * Agent 推理专用线程池：在独立线程中执行 SSE 流式推送，避免阻塞 HTTP 请求线程。
      */
+    @Bean(name = "agentTaskExecutor")
+    public Executor agentTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(16);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("agent-async-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(120);
+        executor.initialize();
+        return executor;
+    }
+
     @Bean(name = "documentTaskExecutor")
     public Executor documentTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

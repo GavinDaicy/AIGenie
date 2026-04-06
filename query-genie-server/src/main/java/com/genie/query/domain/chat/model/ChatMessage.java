@@ -14,11 +14,13 @@ import java.util.Date;
 public class ChatMessage {
     private String id;
     private String sessionId;
-    /** user / assistant */
+    /** user / assistant / ask_user */
     private String role;
     private String content;
-    /** 引用来源 JSON 字符串，仅 assistant 有 */
+    /** QA 模式引用来源 JSON（List<QaSourceItem>），仅 assistant 消息有 */
     private String sources;
+    /** Agent 模式统一引用数据 JSON（List<CitationItem>），仅 assistant 消息有 */
+    private String citationsJson;
     private Integer sortOrder;
     private Date createTime;
 }
