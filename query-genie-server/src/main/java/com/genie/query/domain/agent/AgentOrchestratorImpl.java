@@ -25,6 +25,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.PrintWriter;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -56,6 +58,7 @@ import java.util.stream.Collectors;
 public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestratorImpl.class);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private static final String SYSTEM_PROMPT_TEMPLATE =
             "你是一个企业智能助手。请根据用户的问题，选择合适的工具来获取信息并给出准确答案。\n\n" +
@@ -221,6 +224,17 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     stepEventPublisher.publish(writer, callEvent);
                     persistStepAsync(sessionId, i, "TOOL_CALL", toolName, toolArgs, 0);
 
+                    // askUser 工具：在调用 ToolCallback 之前直接拦截，从 JSON 参数中提取追问内容
+                    // 避免经过 ToolCallback.call() 导致的 JSON 二次编码问题
+                    if (AskUserTool.TOOL_NAME.equals(toolName)) {
+                        String askQuestion = extractAskUserQuestion(toolArgs);
+                        log.info("[AgentOrchestrator] 检测到 askUser 调用 | question={} | sessionId={}", askQuestion, sessionId);
+                        stepEventPublisher.publish(writer, StepEvent.askUser(askQuestion));
+                        persistAskUserMessageAsync(sessionId, askQuestion);
+                        stepEventPublisher.sendDone(writer);
+                        return null; // 暂停 ReAct 循环，等待用户回复
+                    }
+
                     // 执行工具
                     long startMs = System.currentTimeMillis();
                     String toolResult;
@@ -236,23 +250,6 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                         toolResult = "工具执行失败: " + e.getMessage();
                     }
                     long durationMs = System.currentTimeMillis() - startMs;
-
-                    // 检测 AskUserTool 信号：推送追问事件并暂停本轮 Agent
-                    // 注意：Spring AI ToolCallback.call() 可能返回 JSON 编码字符串（如 "\"__ASK_USER__: ...\""），
-                    // 因此用 contains 替代 startsWith，用 indexOf 定位信号起始位置
-                    log.debug("[AgentOrchestrator] 工具原始返回 | tool={} | raw={}", toolName,
-                            toolResult == null ? "null" : toolResult.substring(0, Math.min(200, toolResult.length())));
-                    if (toolResult != null && toolResult.contains(AskUserTool.ASK_USER_SIGNAL)) {
-                        int sigIdx = toolResult.indexOf(AskUserTool.ASK_USER_SIGNAL);
-                        String askQuestion = toolResult.substring(sigIdx + AskUserTool.ASK_USER_SIGNAL.length()).trim();
-                        // 去除 JSON 编码产生的末尾引号/反斜杠等干扰字符
-                        askQuestion = askQuestion.replaceAll("[\"'\\\\}\\]]+$", "").trim();
-                        log.info("[AgentOrchestrator] 检测到追问信号 | question={} | sessionId={}", askQuestion, sessionId);
-                        stepEventPublisher.publish(writer, StepEvent.askUser(askQuestion));
-                        persistAskUserMessageAsync(sessionId, askQuestion);
-                        stepEventPublisher.sendDone(writer);
-                        return null; // 暂停 ReAct 循环，等待用户回复
-                    }
 
                     // 推送 TOOL_RESULT 事件
                     StepEvent resultEvent = StepEvent.toolResult(i, toolName, toolResult, durationMs);
@@ -528,5 +525,23 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         } catch (Exception ex) {
             AgentOrchestratorImpl.log.warn("[AgentOrchestrator] 步骤持久化失败: {}", ex.getMessage());
         }
+    }
+
+    /**
+     * 从 askUser 工具的 JSON 参数字符串中提取追问内容。
+     * Spring AI 将 toolCall.arguments() 序列化为 JSON，如 {"question":"请问..."}，
+     * 此方法直接解析该 JSON，无需依赖返回值信号字符串。
+     */
+    private String extractAskUserQuestion(String toolArgsJson) {
+        try {
+            JsonNode node = OBJECT_MAPPER.readTree(toolArgsJson);
+            JsonNode questionNode = node.get("question");
+            if (questionNode != null && !questionNode.isNull()) {
+                return questionNode.asText();
+            }
+        } catch (Exception e) {
+            log.warn("[AgentOrchestrator] 解析 askUser 参数失败，使用原始值 | args={} | error={}", toolArgsJson, e.getMessage());
+        }
+        return toolArgsJson;
     }
 }
