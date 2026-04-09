@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass 123456
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "123456", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  doc-parser-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    ports:
+      - "8100:8100"
+    environment:
+      - REDIS_URL=redis://:123456@redis:6379/0
+      - STORAGE_TYPE=local
+      - STORAGE_PATH=/data/jobs
+      - SERVICE_BASE_URL=http://localhost:8100
+      - WORKER_MODE=false
+      - MAX_FILE_SIZE_MB=200
+    volumes:
+      - ./data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  doc-parser-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    environment:
+      - REDIS_URL=redis://:123456@redis:6379/0
+      - STORAGE_TYPE=local
+      - STORAGE_PATH=/data/jobs
+      - SERVICE_BASE_URL=http://doc-parser-api:8100
+      - WORKER_MODE=true
+      - MAX_FILE_SIZE_MB=200
+    volumes:
+      - ./data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A app.core.celery_app worker
+      --loglevel=info
+      -Q parse
+      -c 2
