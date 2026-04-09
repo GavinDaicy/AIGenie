@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 public class WebSearchProperties {
 
     private boolean enabled = true;
-    private String provider = "bocha";
+    private String provider = "oriosearch";
     private int maxResults = 5;
     private Providers providers = new Providers();
 
@@ -34,6 +34,7 @@ public class WebSearchProperties {
         private Baidu baidu = new Baidu();
         private AliIqs aliIqs = new AliIqs();
         private Searxng searxng = new Searxng();
+        private OrioSearch orioSearch = new OrioSearch();
 
         public Bocha getBocha() { return bocha; }
         public void setBocha(Bocha bocha) { this.bocha = bocha; }
@@ -46,6 +47,9 @@ public class WebSearchProperties {
 
         public Searxng getSearxng() { return searxng; }
         public void setSearxng(Searxng searxng) { this.searxng = searxng; }
+
+        public OrioSearch getOrioSearch() { return orioSearch; }
+        public void setOrioSearch(OrioSearch orioSearch) { this.orioSearch = orioSearch; }
 
         public static class Bocha {
             private String apiKey = "";
@@ -67,6 +71,12 @@ public class WebSearchProperties {
 
         public static class Searxng {
             private String baseUrl = "http://localhost:8080";
+            public String getBaseUrl() { return baseUrl; }
+            public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+        }
+
+        public static class OrioSearch {
+            private String baseUrl = "http://localhost:8000";
             public String getBaseUrl() { return baseUrl; }
             public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
         }

@@ -4,7 +4,7 @@ module.exports = defineConfig({
   transpileDependencies: true,
   lintOnSave: false,
   devServer: {
-    port: 8080,
+    port: 5000,
     proxy: {
       // 流式接口：禁止代理缓冲，逐块转发 SSE，否则会变成"一次性输出"
       // res.flush() 清空 compression 中间件 gzip 缓冲；setNoDelay 禁用 Nagle 算法

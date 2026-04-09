@@ -58,7 +58,7 @@ app:
   # 联网搜索配置（多 Provider 可插拔，通过 provider 字段切换）
   web-search:
     enabled: ${APP_WEB_SEARCH_ENABLED:true}
-    provider: ${APP_WEB_SEARCH_PROVIDER:bocha}   # bocha | baidu | ali-iqs | searxng
+    provider: ${APP_WEB_SEARCH_PROVIDER:oriosearch}   # oriosearch（默认，免费自托管）| bocha | baidu | ali-iqs | searxng
     max-results: ${APP_WEB_SEARCH_MAX_RESULTS:5}
     providers:
       bocha:
@@ -69,6 +69,8 @@ app:
         api-key: ${ALI_IQS_API_KEY:}
       searxng:
         base-url: ${SEARXNG_BASE_URL:http://localhost:8080}
+      oriosearch:
+        base-url: ${ORIOSEARCH_BASE_URL:http://localhost:8000}
 
   # Query 改写与多查询生成
   query-rewrite:
