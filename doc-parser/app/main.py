@@ -76,6 +76,7 @@ if __name__ == "__main__":
 
 # worker启动命令
 # celery -A app.core.celery_app worker --loglevel=info -Q parse -c 2
+# celery -A app.core.celery_app worker --loglevel=info -Q parse -c 1
 
 # 参数	含义
 # -A app.core.celery_app	指定 Celery 应用

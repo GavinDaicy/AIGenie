@@ -47,8 +47,10 @@ services:
       - SERVICE_BASE_URL=http://doc-parser-api:8100
       - WORKER_MODE=true
       - MAX_FILE_SIZE_MB=200
+      - PADDLE_HOME=/data/paddle_models
     volumes:
       - ./data:/data
+      - paddle_models:/data/paddle_models
     depends_on:
       redis:
         condition: service_healthy
@@ -57,3 +59,6 @@ services:
       --loglevel=info
       -Q parse
       -c 2
+
+volumes:
+  paddle_models:

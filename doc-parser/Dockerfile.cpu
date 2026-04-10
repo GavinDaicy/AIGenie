@@ -5,6 +5,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
     curl \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.cpu.txt .
@@ -13,7 +17,8 @@ RUN pip install --no-cache-dir -r requirements.cpu.txt
 COPY app/ ./app/
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PADDLE_HOME=/data/paddle_models
 
 EXPOSE 8100
 

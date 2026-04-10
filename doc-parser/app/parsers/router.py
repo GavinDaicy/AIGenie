@@ -2,13 +2,31 @@ import re
 from pathlib import Path
 from app.parsers.base import BaseParser
 
+_PPSTRUCTURE_AVAILABLE: bool | None = None
+
+
+def _check_ppstructure() -> bool:
+    """运行时检测 paddleocr 是否可用；结果缓存到模块级变量，避免重复 import。"""
+    global _PPSTRUCTURE_AVAILABLE
+    if _PPSTRUCTURE_AVAILABLE is None:
+        try:
+            import paddleocr  # noqa: F401
+            _PPSTRUCTURE_AVAILABLE = True
+        except ImportError:
+            _PPSTRUCTURE_AVAILABLE = False
+    return _PPSTRUCTURE_AVAILABLE
+
 
 def select_parser(filename: str, language_hint: str = "auto") -> str:
     """
     根据文件扩展名和语言提示选择解析引擎。
-    返回值：'mineru' | 'docling' | 'excel'
+    返回值：'ppstructure' | 'docling' | 'excel'
 
-    language_hint 为 'auto' 时：检测文件名是否含中文字符，自动判断。
+    - PDF（所有语言）→ ppstructure（paddleocr 不可用时自动降级为 docling）
+    - 中文图片 → ppstructure（paddleocr 不可用时自动降级为 docling）
+    - Word / PPT / HTML / Markdown / 英文图片 → docling
+    - Excel / CSV → excel
+    - language_hint 为 'auto' 时检测文件名是否含中文字符自动判断
     """
     ext = Path(filename).suffix.lower()
     lang = _resolve_language(filename, language_hint)
@@ -20,10 +38,12 @@ def select_parser(filename: str, language_hint: str = "auto") -> str:
         return "excel"
 
     if ext == ".pdf":
-        return "mineru" if lang in ("zh", "auto") else "docling"
+        return "ppstructure" if _check_ppstructure() else "docling"
 
     if ext in (".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".webp"):
-        return "mineru" if lang in ("zh", "auto") else "docling"
+        if lang in ("zh", "auto"):
+            return "ppstructure" if _check_ppstructure() else "docling"
+        return "docling"
 
     return "docling"
 
@@ -37,20 +57,17 @@ def _resolve_language(filename: str, language_hint: str) -> str:
 
 
 def create_parser(engine_name: str) -> BaseParser:
-    """
-    解析器工厂方法。
-    I2 阶段接入真实实现，当前仅注册占位检查。
-    """
+    """解析器工厂方法。ppstructure 不可用时自动降级到 docling。"""
     if engine_name == "docling":
         from app.parsers.docling_parser import DoclingParser
         return DoclingParser()
     if engine_name == "excel":
         from app.parsers.excel_parser import ExcelParser
         return ExcelParser()
-    if engine_name == "mineru":
+    if engine_name == "ppstructure":
         try:
-            from app.parsers.mineru_parser import MinerUParser
-            return MinerUParser()
+            from app.parsers.pp_structure_parser import PPStructureParser
+            return PPStructureParser()
         except ImportError:
             from app.parsers.docling_parser import DoclingParser
             return DoclingParser()

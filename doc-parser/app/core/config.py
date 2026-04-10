@@ -49,7 +49,7 @@ class Settings(BaseSettings):
             raise ValueError("storage_type must be 'local' or 'cloud'")
         return v
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
