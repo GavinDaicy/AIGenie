@@ -7,10 +7,11 @@ import java.util.List;
  *
  * <p>通过 {@code app.web-search.provider} 配置选择具体实现：
  * <ul>
- *   <li>{@code bocha}   - 博查AI（默认，国内合规）</li>
- *   <li>{@code baidu}   - 百度AI搜索（千帆平台）</li>
- *   <li>{@code ali-iqs} - 阿里云IQS通用搜索</li>
- *   <li>{@code searxng} - SearXNG自托管（免费，无API Key）</li>
+ *   <li>{@code oriosearch} - OrioSearch自托管（免费，默认，无API Key，Docker一键部署）</li>
+ *   <li>{@code bocha}      - 博查AI（付费，国内合规）</li>
+ *   <li>{@code baidu}      - 百度AI搜索（千帆平台）</li>
+ *   <li>{@code ali-iqs}   - 阿里云IQS通用搜索</li>
+ *   <li>{@code searxng}   - SearXNG自托管（免费，无API Key）</li>
  * </ul>
  *
  * @author daicy
