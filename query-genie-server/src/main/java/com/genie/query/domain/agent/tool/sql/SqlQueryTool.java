@@ -15,6 +15,8 @@ import com.genie.query.domain.schema.dao.DbTableSchemaDAO;
 import com.genie.query.domain.schema.model.DbTableSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.genie.query.domain.agent.tool.spi.AgentTool;
+import com.genie.query.domain.agent.tool.spi.AgentToolMeta;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,8 +45,9 @@ import java.util.stream.Collectors;
  * @author daicy
  * @date 2026/4/2
  */
+@AgentToolMeta(name = "sql", group = "data", forceable = true, toolForceField = "sql")
 @Component
-public class SqlQueryTool {
+public class SqlQueryTool implements AgentTool {
 
     private static final Logger log = LoggerFactory.getLogger(SqlQueryTool.class);
 

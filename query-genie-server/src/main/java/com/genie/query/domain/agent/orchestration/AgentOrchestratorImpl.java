@@ -4,14 +4,12 @@ import com.genie.query.domain.agent.citation.CitationItem;
 import com.genie.query.domain.agent.citation.CitationRegistry;
 import com.genie.query.domain.agent.repository.AgentStepLogRepository;
 import com.genie.query.domain.agent.model.AgentStepLog;
-import com.genie.query.domain.agent.tool.sql.SqlQueryTool;
 import com.genie.query.domain.agent.event.StepEvent;
 import com.genie.query.domain.agent.event.StepEventPublisher;
 import com.genie.query.domain.agent.planning.PlannerService;
 import com.genie.query.domain.agent.planning.ExecutionPlan;
 import com.genie.query.domain.agent.tool.AskUserTool;
-import com.genie.query.domain.agent.tool.RagSearchTool;
-import com.genie.query.domain.agent.tool.WebSearchTool;
+import com.genie.query.domain.agent.tool.ToolRegistry;
 import com.genie.query.domain.chat.dao.ChatMessageDAO;
 import com.genie.query.domain.chat.model.ChatMessage;
 import com.genie.query.domain.qa.model.ChatTurn;
@@ -150,16 +148,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private ChatModel chatModel;
 
     @Autowired
-    private SqlQueryTool sqlQueryTool;
-
-    @Autowired
-    private RagSearchTool ragSearchTool;
-
-    @Autowired
-    private WebSearchTool webSearchTool;
-
-    @Autowired
-    private AskUserTool askUserTool;
+    private ToolRegistry toolRegistry;
 
     @Autowired
     private StepEventPublisher stepEventPublisher;
@@ -619,33 +608,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private List<Object> buildToolList(AgentAskRequest.ToolForce toolForce,
                                        List<Long> datasourceIds,
                                        List<String> knowledgeCodes) {
-        List<Object> tools = new ArrayList<>();
-        tools.add(askUserTool); // askUser 始终保留
-
-        // SQL 工具：toolForce 未明确禁用 且 数据源不为空列表 时加入
-        boolean sqlEnabled = !Boolean.FALSE.equals(toolForce == null ? null : toolForce.getSql())
-                && !(datasourceIds != null && datasourceIds.isEmpty());
-        if (sqlEnabled) {
-            tools.add(sqlQueryTool);
-        }
-
-        // 知识库工具：toolForce 未明确禁用 且 知识库编码不为空列表 时加入
-        boolean kbEnabled = !Boolean.FALSE.equals(toolForce == null ? null : toolForce.getKnowledge())
-                && !(knowledgeCodes != null && knowledgeCodes.isEmpty());
-        if (kbEnabled) {
-            tools.add(ragSearchTool);
-        }
-
-        // 联网搜索：toolForce 未明确禁用 且 webSearchTool 可用时加入
-        boolean webEnabled = !Boolean.FALSE.equals(toolForce == null ? null : toolForce.getWebSearch())
-                && webSearchTool != null;
-        if (webEnabled) {
-            tools.add(webSearchTool);
-        }
-
-        log.info("[AgentOrchestrator] 工具列表 | sql={} kb={} web={} | toolForce={}",
-                sqlEnabled, kbEnabled, webEnabled, toolForce);
-        return tools;
+        return toolRegistry.getTools(toolForce, datasourceIds, knowledgeCodes);
     }
 
     private String resolveAllKnowledgeCodes() {
