@@ -50,9 +50,6 @@ public class AgentApplication {
     @Autowired(required = false)
     private ChatMessageDAO chatMessageDAO;
 
-    @Autowired(required = false)
-    private SessionApplication sessionApplication;
-
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String buildRoutingLabel(QuestionType type) {
@@ -149,12 +146,6 @@ public class AgentApplication {
                 userMsg.setContent(question);
                 userMsg.setSortOrder(nextOrder);
                 chatMessageDAO.insert(userMsg);
-
-                // 首轮对话更新会话标题
-                if (nextOrder == 0 && sessionApplication != null) {
-                    String title = question.length() > 30 ? question.substring(0, 30) + "..." : question;
-                    sessionApplication.updateSessionTitle(sessionId, title);
-                }
 
                 // 有最终答案时才持久化 assistant 消息（追问场景 finalAnswer 为 null）
                 if (finalAnswer != null) {

@@ -6,14 +6,11 @@ import com.genie.query.domain.agent.repository.AgentStepLogRepository;
 import com.genie.query.domain.agent.model.AgentStepLog;
 import com.genie.query.domain.agent.event.StepEvent;
 import com.genie.query.domain.agent.event.StepEventPublisher;
-import com.genie.query.domain.agent.planning.PlannerService;
-import com.genie.query.domain.agent.planning.ExecutionPlan;
+import com.genie.query.domain.agent.middleware.MiddlewareChain;
 import com.genie.query.domain.agent.tool.AskUserTool;
 import com.genie.query.domain.agent.tool.ToolRegistry;
 import com.genie.query.domain.chat.dao.ChatMessageDAO;
 import com.genie.query.domain.chat.model.ChatMessage;
-import com.genie.query.domain.qa.model.ChatTurn;
-import com.genie.query.domain.qa.service.ConversationSummarizer;
 import com.genie.query.domain.knowledge.dao.KnowledgeDAO;
 import com.genie.query.domain.knowledge.model.KLState;
 import com.genie.query.domain.knowledge.model.Knowledge;
@@ -43,10 +40,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import com.genie.query.controller.dto.AgentAskRequest;
-import com.genie.query.domain.cache.CacheService;
 
 /**
  * Agent 编排引擎实现：基于 Spring AI Tool Calling 驱动 ReAct 循环。
@@ -138,12 +133,6 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     @Value("${app.agent.max-iterations:8}")
     private int maxIterations;
 
-    @Value("${app.agent.max-history-turns:5}")
-    private int maxHistoryTurns;
-
-    @Value("${app.agent.summarize-when-turns-over:5}")
-    private int summarizeWhenTurnsOver;
-
     @Autowired
     private ChatModel chatModel;
 
@@ -168,18 +157,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     @Autowired(required = false)
     private ChatMessageDAO chatMessageDAO;
 
-    @Autowired(required = false)
-    private ConversationSummarizer conversationSummarizer;
-
     @Autowired
-    private PlannerService plannerService;
-
-    @Autowired
-    private CacheService cacheService;
-
-    /** askUser 暂停上下文的 Redis key 前缀，value 为已执行工具结果文本，TTL 10分钟 */
-    private static final String PAUSED_CTX_KEY_PREFIX = "agent:paused_ctx:";
-    private static final long PAUSED_CTX_TTL_MINUTES = 10L;
+    private MiddlewareChain middlewareChain;
 
     @Override
     public AgentResult execute(String question, String sessionId,
@@ -187,39 +166,25 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                                AgentAskRequest.ToolForce toolForce,
                                PrintWriter writer) {
 
-        AgentContext context = new AgentContext(sessionId, question, knowledgeCodes, datasourceIds);
+        AgentContext context = new AgentContext(sessionId, question, knowledgeCodes, datasourceIds, writer);
         log.info("[AgentOrchestrator] 开始执行 | sessionId={} | question={}", sessionId, question);
         String finalAnswer = null;
         List<CitationItem> allCitations = new ArrayList<>();
+        AgentResult result = AgentResult.of(null, allCitations);
 
         try {
+            // 中间件前置处理（历史注入、暂停上下文恢复、任务规划）
+            middlewareChain.runBefore(context);
+
             // 初始化工具 Callback（根据 toolForce 动态过滤被禁用的工具）
             List<Object> toolList = buildToolList(toolForce, datasourceIds, knowledgeCodes);
             ToolCallback[] toolCallbacks = ToolCallbacks.from(toolList.toArray());
             Map<String, ToolCallback> callbackMap = Arrays.stream(toolCallbacks)
                     .collect(Collectors.toMap(cb -> cb.getToolDefinition().name(), cb -> cb));
 
-            // 初始化消息历史
+            // 初始化消息历史（System Prompt）
             String systemPrompt = buildSystemPrompt(datasourceIds, knowledgeCodes, toolForce);
             context.addMessage(new SystemMessage(systemPrompt));
-
-            // 检查是否为 askUser 续跑：若有暂停前的工具结果，注入为上下文避免 LLM 重复执行
-            String pausedHint = getPausedContext(sessionId);
-            if (pausedHint != null) {
-                log.info("[AgentOrchestrator] 检测到 askUser 续跑上下文 | sessionId={}", sessionId);
-                context.addMessage(new SystemMessage(
-                        "[续跑上下文] 用户回复追问前，本轮已执行以下工具并得到结果，请勿重复执行：\n"
-                        + pausedHint));
-            }
-
-            // 任务规划：优先尝试生成依赖链执行计划，fallback 到多子问题清单
-            String contextHint = buildContextHint(question, knowledgeCodes, datasourceIds, sessionId, writer);
-            if (contextHint != null) {
-                context.addMessage(new SystemMessage(contextHint));
-            }
-
-            // 注入会话历史（多轮对话支持）
-            injectHistoryIntoContext(context);
 
             context.addMessage(new UserMessage(question));
 
@@ -279,21 +244,14 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     if (AskUserTool.TOOL_NAME.equals(toolName)) {
                         String askQuestion = extractAskUserQuestion(toolArgs);
                         log.info("[AgentOrchestrator] 检测到 askUser 调用 | question={} | sessionId={}", askQuestion, sessionId);
-                        // 保存本轮已执行工具的结果到 Redis，续跑时注入为上下文（避免 LLM 重复调用工具）
-                        String toolResultsHint = buildToolResultsHint(context);
-                        if (!toolResultsHint.isBlank()) {
-                            cacheService.set(
-                                    PAUSED_CTX_KEY_PREFIX + sessionId,
-                                    toolResultsHint,
-                                    PAUSED_CTX_TTL_MINUTES,
-                                    TimeUnit.MINUTES);
-                            log.debug("[AgentOrchestrator] 已保存 askUser 暂停上下文到 Redis | sessionId={}", sessionId);
-                        }
+                        middlewareChain.runOnAskUserPause(context, buildToolResultsHint(context));
                         stepEventPublisher.publish(writer, StepEvent.askUser(askQuestion));
                         persistAskUserMessageAsync(sessionId, askQuestion);
                         stepEventPublisher.sendDone(writer);
+                        result = AgentResult.paused();
+                        middlewareChain.runAfter(context, result);
                         CitationRegistry.cleanup();
-                        return AgentResult.paused(); // 暂停 ReAct 循环，等待用户回复
+                        return result; // 暂停 ReAct 循环，等待用户回复
                     }
 
                     // 执行工具
@@ -364,110 +322,17 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
             stepEventPublisher.sendDone(writer);
 
+            result = AgentResult.of(finalAnswer, allCitations);
+
         } catch (Exception e) {
             log.error("[AgentOrchestrator] 执行异常 | sessionId={} | error={}", sessionId, e.getMessage(), e);
             stepEventPublisher.publish(writer, StepEvent.error("Agent执行异常: " + e.getMessage()));
             stepEventPublisher.sendDone(writer);
         } finally {
+            middlewareChain.runAfter(context, result);
             CitationRegistry.cleanup();
         }
-        return AgentResult.of(finalAnswer, allCitations);
-    }
-
-    /**
-     * 从 DB 加载会话历史并注入到 AgentContext，支持 LLM 摘要压缩超长历史。
-     * 注入位置：SystemMessage(s) 之后、当前 UserMessage 之前。
-     */
-    private void injectHistoryIntoContext(AgentContext context) {
-        String sessionId = context.getSessionId();
-        if (sessionId == null || chatMessageDAO == null) {
-            return;
-        }
-        int fetchLimit = (maxHistoryTurns + summarizeWhenTurnsOver + 2) * 2;
-        List<ChatMessage> rawMessages;
-        try {
-            rawMessages = chatMessageDAO.listBySessionIdOrderBySortOrder(sessionId, fetchLimit);
-        } catch (Exception e) {
-            log.warn("[AgentOrchestrator] 加载历史消息失败 | sessionId={} | error={}", sessionId, e.getMessage());
-            return;
-        }
-        if (rawMessages.isEmpty()) {
-            return;
-        }
-
-        List<ChatTurn> allTurns = rawMessages.stream()
-                .map(m -> ChatTurn.builder().role(m.getRole()).content(m.getContent()).build())
-                .collect(Collectors.toList());
-        int totalTurns = allTurns.size();
-
-        if (totalTurns <= summarizeWhenTurnsOver * 2 || conversationSummarizer == null) {
-            // 截断模式：保留最近 maxHistoryTurns 轮
-            int from = Math.max(0, totalTurns - maxHistoryTurns * 2);
-            List<ChatTurn> recentTurns = allTurns.subList(from, totalTurns);
-            for (ChatTurn turn : recentTurns) {
-                context.addMessage(toSpringAiMessage(turn));
-            }
-        } else {
-            // 摘要模式：早期轮次压缩，近期轮次原样保留
-            int keepRecentCount = summarizeWhenTurnsOver * 2;
-            int summarizeSize = totalTurns - keepRecentCount;
-            List<ChatTurn> toSummarize = allTurns.subList(0, summarizeSize);
-            List<ChatTurn> recent = allTurns.subList(summarizeSize, totalTurns);
-
-            String summary = null;
-            try {
-                summary = conversationSummarizer.summarize(toSummarize);
-            } catch (Exception e) {
-                log.warn("[AgentOrchestrator] 历史摘要失败，降级截断 | error={}", e.getMessage());
-            }
-            if (summary != null && !summary.isBlank()) {
-                context.addMessage(new SystemMessage("[此前对话摘要] " + summary));
-            }
-            for (ChatTurn turn : recent) {
-                context.addMessage(toSpringAiMessage(turn));
-            }
-        }
-        log.info("[AgentOrchestrator] 历史注入完成 | sessionId={} | 原始消息数={} | 总轮数={}",
-                sessionId, rawMessages.size(), totalTurns);
-    }
-
-    private org.springframework.ai.chat.messages.Message toSpringAiMessage(ChatTurn turn) {
-        if ("user".equals(turn.getRole())) {
-            return new UserMessage(turn.getContent());
-        } else if ("ask_user".equals(turn.getRole())) {
-            return new AssistantMessage("[Agent追问] " + turn.getContent());
-        } else {
-            return new AssistantMessage(turn.getContent());
-        }
-    }
-
-    private String buildContextHint(String question, List<String> knowledgeCodes,
-                                    List<Long> datasourceIds, String sessionId,
-                                    PrintWriter writer) {
-        // 优先：LLM 智能规划（依赖链场景）
-        try {
-            stepEventPublisher.publish(writer, StepEvent.planning("正在分析问题，生成执行计划…"));
-            ExecutionPlan plan = plannerService.plan(question, knowledgeCodes, datasourceIds);
-            if (plan != null) {
-                log.info("[AgentOrchestrator] 已生成执行计划 | steps={} | sessionId={}",
-                        plan.getSteps().size(), sessionId);
-                stepEventPublisher.publish(writer,
-                        StepEvent.planning("已生成 " + plan.getSteps().size() + " 步执行计划"));
-                return plan.toTaskListHint();
-            }
-        } catch (Exception e) {
-            log.warn("[AgentOrchestrator] 执行计划生成失败，降级到多子问题清单 | error={}", e.getMessage());
-        }
-        // Fallback：多子问题并列清单（并列独立子问题场景）
-        String taskList = buildSubQuestionTaskList(question);
-        if (taskList != null) {
-            log.info("[AgentOrchestrator] 检测到多子问题，已注入任务清单 | sessionId={}", sessionId);
-            stepEventPublisher.publish(writer,
-                    StepEvent.planning("检测到多子问题，将逐一处理"));
-        } else {
-            stepEventPublisher.publish(writer, StepEvent.planning("无需额外规划，直接开始推理"));
-        }
-        return taskList;
+        return result;
     }
 
     /**
@@ -533,24 +398,6 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     iteration, callEx.getMessage());
             return new AssistantMessage("");
         }
-    }
-
-    private String buildSubQuestionTaskList(String question) {
-        String[] parts = question.split("[？?]");
-        List<String> subQuestions = Arrays.stream(parts)
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .collect(Collectors.toList());
-        if (subQuestions.size() < 2) {
-            return null;
-        }
-        StringBuilder sb = new StringBuilder("【多子问题任务清单】用户共提出 ")
-                .append(subQuestions.size()).append(" 个问题，你必须逐一调用工具处理每个问题，全部有答案后才能输出最终结论：\n");
-        for (int i = 0; i < subQuestions.size(); i++) {
-            sb.append(i + 1).append(". ").append(subQuestions.get(i)).append("？\n");
-        }
-        sb.append("\n每轮思考后，请检查以上清单中哪些还没有工具返回的答案，继续调用工具直到全部完成。");
-        return sb.toString();
     }
 
     private String buildSystemPrompt(List<Long> datasourceIds, List<String> knowledgeCodes,
@@ -724,19 +571,6 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                         .map(r -> "工具[" + r.name() + "]结果：" + r.responseData())
                         .collect(Collectors.joining("\n")))
                 .collect(Collectors.joining("\n\n"));
-    }
-
-    /**
-     * 从 Redis 取出并删除指定 session 的暂停上下文（一次性消费）。
-     * Redis TTL 到期后自动失效，无需手动判断过期。
-     */
-    private String getPausedContext(String sessionId) {
-        String key = PAUSED_CTX_KEY_PREFIX + sessionId;
-        String hint = cacheService.get(key);
-        if (hint != null) {
-            cacheService.delete(key);
-        }
-        return hint;
     }
 
     /**
