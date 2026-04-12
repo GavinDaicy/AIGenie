@@ -32,6 +32,8 @@ public class ResultFormatter {
 
     private static final int MARKDOWN_TABLE_MAX_ROWS = 20;
 
+    private static final int MAX_ROWS_LIMIT = 500;
+
     private static final String SUMMARY_PROMPT_TEMPLATE =
             "以下是SQL查询结果（共%d行），请用简洁的中文总结分析结论，不超过200字：\n\n%s";
 
@@ -106,6 +108,9 @@ public class ResultFormatter {
         StringBuilder footer = new StringBuilder("\n");
         footer.append("（共 ").append(result.rowCount()).append(" 条记录");
         footer.append("，执行耗时 ").append(result.getExecutionTimeMs()).append("ms）");
+        if (result.rowCount() >= MAX_ROWS_LIMIT) {
+            footer.append("\n【注意：查询结果已被限制为最多 500 条，实际数据可能更多，请添加更精确的筛选条件后再查询】");
+        }
         if (StringUtils.isNotBlank(sql)) {
             footer.append("\n\n<details><summary>查看执行 SQL</summary>\n\n```sql\n")
                   .append(sql.trim())
