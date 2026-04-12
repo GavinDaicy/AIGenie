@@ -18,7 +18,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 反馈应用服务：处理用户点赞/点踩，驱动 FewShot ES 写入。
@@ -107,9 +109,9 @@ public class FeedbackApplication {
                 return;
             }
 
-            // 2. 从 citations 中提取 SQL
-            String sql = findSqlFromCitations(assistantMsg.getCitationsJson());
-            if (sql == null || sql.isBlank()) {
+            // 2. 从 citations 中提取全部不重复的 SQL
+            List<String> sqls = findAllSqlsFromCitations(assistantMsg.getCitationsJson());
+            if (sqls.isEmpty()) {
                 log.info("[Feedback] assistant 消息无 SQL citation，跳过 FewShot 写入 | messageId={}", feedback.getMessageId());
                 return;
             }
@@ -127,28 +129,40 @@ public class FeedbackApplication {
             String standaloneQuestion = resolveStandaloneQuestion(
                     rawQuestion, feedback.getSessionId(), assistantMsg.getSortOrder());
 
-            // 5. 写入 FewShot ES
-            dynamicFewShotService.saveSuccessfulPair(
-                    standaloneQuestion, sql, null, String.valueOf(feedback.getId()));
-            log.info("[Feedback] FewShot 写入完成 | question={} | feedbackId={}", standaloneQuestion, feedback.getId());
+            // 5. 每条不重复的 SQL 各写入一对 Q→SQL
+            String feedbackId = String.valueOf(feedback.getId());
+            for (String sql : sqls) {
+                dynamicFewShotService.saveSuccessfulPair(standaloneQuestion, sql, null, feedbackId);
+            }
+            log.info("[Feedback] FewShot 写入完成 | question={} | sqlCount={} | feedbackId={}",
+                    standaloneQuestion, sqls.size(), feedback.getId());
         } catch (Exception e) {
             log.warn("[Feedback] FewShot 异步写入失败（不影响主流程） | error={}", e.getMessage(), e);
         }
     }
 
-    private String findSqlFromCitations(String citationsJson) {
-        if (citationsJson == null || citationsJson.isBlank()) return null;
+    /**
+     * 从 citationsJson 中提取所有不重复的 SQL 语句（按出现顺序）。
+     *
+     * <p>多次 sqlQuery 工具调用各产生一条 SQL citation；SelfCorrectionLoop 重试可能产生
+     * 相同 SQL，用 LinkedHashSet 去重后保证每条不同 SQL 只存入 ES 一次。
+     */
+    private List<String> findAllSqlsFromCitations(String citationsJson) {
+        if (citationsJson == null || citationsJson.isBlank()) return List.of();
         try {
             List<CitationItem> citations = objectMapper.readValue(citationsJson, new TypeReference<>() {});
+            Set<String> seen = new LinkedHashSet<>();
             for (CitationItem c : citations) {
-                if (CitationItem.CitationType.SQL == c.getType() && c.getSql() != null && !c.getSql().isBlank()) {
-                    return c.getSql();
+                if (CitationItem.CitationType.SQL == c.getType()
+                        && c.getSql() != null && !c.getSql().isBlank()) {
+                    seen.add(c.getSql().trim());
                 }
             }
+            return new ArrayList<>(seen);
         } catch (Exception e) {
             log.warn("[Feedback] 解析 citationsJson 失败 | error={}", e.getMessage());
+            return List.of();
         }
-        return null;
     }
 
     private ChatMessage findPrecedingUserMessage(String sessionId, int assistantSortOrder) {
