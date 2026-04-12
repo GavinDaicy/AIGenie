@@ -8,6 +8,7 @@ import com.genie.query.domain.query.service.QueryRewriteService;
 import com.genie.query.domain.vectorstore.SearchMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.genie.query.domain.agent.routing.RecentHistoryHolder;
 import com.genie.query.domain.agent.tool.spi.AgentTool;
 import com.genie.query.domain.agent.tool.spi.AgentToolMeta;
 import org.springframework.ai.tool.annotation.Tool;
@@ -94,8 +95,11 @@ public class RagSearchTool implements AgentTool {
     private List<String> resolveQueries(String question, List<String> kbCodes) {
         if (queryRewriteService == null) return List.of(question);
         try {
+            List<String> recentHistory = RecentHistoryHolder.get();
             QueryRewriteService.QueryRewriteContext ctx =
-                    new QueryRewriteService.QueryRewriteContext(kbCodes.isEmpty() ? null : kbCodes);
+                    new QueryRewriteService.QueryRewriteContext(
+                            kbCodes.isEmpty() ? null : kbCodes,
+                            recentHistory.isEmpty() ? null : recentHistory);
             QueryRewriteService.QueryRewriteResult result =
                     queryRewriteService.generateQueries(question, 3, ctx);
             List<String> queries = new ArrayList<>();

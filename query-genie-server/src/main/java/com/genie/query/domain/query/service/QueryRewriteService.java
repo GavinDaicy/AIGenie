@@ -23,6 +23,7 @@ public interface QueryRewriteService {
      */
     class QueryRewriteContext {
         private List<String> knowledgeCodes;
+        private List<String> historyMessages;
 
         public QueryRewriteContext() {
         }
@@ -31,12 +32,25 @@ public interface QueryRewriteService {
             this.knowledgeCodes = knowledgeCodes;
         }
 
+        public QueryRewriteContext(List<String> knowledgeCodes, List<String> historyMessages) {
+            this.knowledgeCodes = knowledgeCodes;
+            this.historyMessages = historyMessages;
+        }
+
         public List<String> getKnowledgeCodes() {
             return knowledgeCodes;
         }
 
         public void setKnowledgeCodes(List<String> knowledgeCodes) {
             this.knowledgeCodes = knowledgeCodes;
+        }
+
+        public List<String> getHistoryMessages() {
+            return historyMessages;
+        }
+
+        public void setHistoryMessages(List<String> historyMessages) {
+            this.historyMessages = historyMessages;
         }
     }
 

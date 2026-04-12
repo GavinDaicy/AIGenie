@@ -28,14 +28,6 @@ public class DefaultSemanticRouter implements SemanticRouter {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultSemanticRouter.class);
 
-    private static final String LLM_CLASSIFY_PROMPT =
-            "请将以下用户问题分类为以下三类之一，只回复类别名称，不要解释：\n" +
-            "- DATA_QUERY：数据分析、统计、查询、价格、排名、比较、趋势等需要查数据库的问题\n" +
-            "- KNOWLEDGE：产品信息、规范文件、操作手册、概念解释、\"什么是\"、\"如何\"等知识文档类问题\n" +
-            "- COMPLEX：需要同时查知识库和数据库、或问题复杂需要多步推理的综合类问题\n\n" +
-            "用户问题：%s\n\n" +
-            "分类结果：";
-
     private static final List<Pattern> DATA_QUERY_PATTERNS = List.of(
             Pattern.compile("价格|报价|行情|单价|均价|最低价|最高价", Pattern.CASE_INSENSITIVE),
             Pattern.compile("统计|汇总|合计|总量|总数|数量|金额|总额", Pattern.CASE_INSENSITIVE),
@@ -58,7 +50,7 @@ public class DefaultSemanticRouter implements SemanticRouter {
     private ChatModel chatModel;
 
     @Override
-    public QuestionType route(String question) {
+    public QuestionType route(String question, List<String> recentHistory) {
         if (question == null || question.isBlank()) {
             return QuestionType.KNOWLEDGE;
         }
@@ -72,7 +64,7 @@ public class DefaultSemanticRouter implements SemanticRouter {
             return QuestionType.COMPLEX;
         }
 
-        // 优先：关键词规则（零成本，毫秒级）
+        // 优先：关键词规则（零成本，毫秒级，无需历史）
         if (matchesAny(trimmed, DATA_QUERY_PATTERNS)) {
             log.debug("[SemanticRouter] 规则命中 DATA_QUERY | question={}", trimmed);
             return QuestionType.DATA_QUERY;
@@ -83,8 +75,8 @@ public class DefaultSemanticRouter implements SemanticRouter {
             return QuestionType.KNOWLEDGE;
         }
 
-        // 兜底：LLM 分类（单次轻量调用）
-        return llmClassify(trimmed);
+        // 兜底：LLM 分类（单次轻量调用，携带历史上下文）
+        return llmClassify(trimmed, recentHistory);
     }
 
     private boolean isMultiQuestion(String question) {
@@ -104,14 +96,14 @@ public class DefaultSemanticRouter implements SemanticRouter {
         return false;
     }
 
-    private QuestionType llmClassify(String question) {
+    private QuestionType llmClassify(String question, List<String> recentHistory) {
         if (chatModel == null) {
             log.warn("[SemanticRouter] ChatModel 未配置，兜底返回 KNOWLEDGE");
             return QuestionType.KNOWLEDGE;
         }
 
         try {
-            String prompt = String.format(LLM_CLASSIFY_PROMPT, question);
+            String prompt = buildClassifyPrompt(question, recentHistory);
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResult().getOutput().getText();
 
@@ -134,5 +126,21 @@ public class DefaultSemanticRouter implements SemanticRouter {
             log.warn("[SemanticRouter] LLM 分类失败，兜底 COMPLEX | error={}", e.getMessage());
             return QuestionType.COMPLEX;
         }
+    }
+
+    private String buildClassifyPrompt(String question, List<String> recentHistory) {
+        String header = "请将以下用户问题分类为以下三类之一，只回复类别名称，不要解释：\n" +
+                "- DATA_QUERY：数据分析、统计、查询、价格、排名、比较、趋势等需要查数据库的问题\n" +
+                "- KNOWLEDGE：产品信息、规范文件、操作手册、概念解释、\"什么是\"、\"如何\"等知识文档类问题\n" +
+                "- COMPLEX：需要同时查知识库和数据库、或问题复杂需要多步推理的综合类问题\n\n";
+
+        if (recentHistory != null && !recentHistory.isEmpty()) {
+            return header +
+                    "【近期对话上下文（最近" + recentHistory.size() + "条）】\n" +
+                    String.join("\n", recentHistory) + "\n\n" +
+                    "【当前需要分类的问题】\n" + question + "\n\n" +
+                    "分类结果：";
+        }
+        return header + "用户问题：" + question + "\n\n分类结果：";
     }
 }

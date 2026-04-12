@@ -11,6 +11,7 @@ import com.genie.query.domain.agent.event.StepEventPublisher;
 import com.genie.query.domain.chat.dao.ChatMessageDAO;
 import com.genie.query.domain.chat.model.ChatMessage;
 
+import com.genie.query.domain.agent.routing.RecentHistoryHolder;
 import org.apache.commons.collections4.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.io.PrintWriter;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -73,17 +75,23 @@ public class AgentApplication {
         List<Long> datasourceIds = CollectionUtils.isEmpty(request.getDatasourceIds()) ? null : request.getDatasourceIds();
         AgentAskRequest.ToolForce toolForce = request.getToolForce();
 
-        QuestionType questionType = routeQuestion(question, writer);
-        EffectiveTools tools = resolveEffectiveTools(questionType, datasourceIds, knowledgeCodes, toolForce);
-        AgentResult agentResult = executeAgent(question, sessionId, tools, toolForce, writer);
-        persistConversation(sessionId, question, agentResult);
+        List<String> recentHistory = loadRecentHistory(sessionId, 2);
+        RecentHistoryHolder.set(recentHistory);
+        try {
+            QuestionType questionType = routeQuestion(question, recentHistory, writer);
+            EffectiveTools tools = resolveEffectiveTools(questionType, datasourceIds, knowledgeCodes, toolForce);
+            AgentResult agentResult = executeAgent(question, sessionId, tools, toolForce, writer);
+            persistConversation(sessionId, question, agentResult);
+        } finally {
+            RecentHistoryHolder.clear();
+        }
     }
 
-    private QuestionType routeQuestion(String question, PrintWriter writer) {
+    private QuestionType routeQuestion(String question, List<String> recentHistory, PrintWriter writer) {
         stepEventPublisher.publish(writer, StepEvent.planning("正在识别问题意图…"));
         QuestionType type;
         try {
-            type = semanticRouter.route(question);
+            type = semanticRouter.route(question, recentHistory);
             log.info("[AgentApplication] 路由结果 | type={} | question={}", type, question);
         } catch (Exception e) {
             log.warn("[AgentApplication] 语义路由异常，兜底 COMPLEX | error={}", e.getMessage());
@@ -183,6 +191,30 @@ public class AgentApplication {
             }
         }
         chatMessageDAO.insert(assistantMsg);
+    }
+
+    private List<String> loadRecentHistory(String sessionId, int turns) {
+        if (sessionId == null || chatMessageDAO == null) return List.of();
+        try {
+            List<ChatMessage> msgs = chatMessageDAO.listBySessionIdOrderBySortOrder(sessionId, turns * 2);
+            List<String> history = new ArrayList<>();
+            for (ChatMessage msg : msgs) {
+                if ("user".equals(msg.getRole())) {
+                    history.add("用户：" + msg.getContent());
+                } else if ("assistant".equals(msg.getRole())) {
+                    String content = msg.getContent();
+                    if (content != null && content.length() > 200) {
+                        content = content.substring(0, 200);
+                    }
+                    history.add("助手：" + content);
+                }
+            }
+            log.debug("[AgentApplication] 加载近期历史 | sessionId={} | size={}", sessionId, history.size());
+            return history;
+        } catch (Exception e) {
+            log.warn("[AgentApplication] 加载近期历史失败，降级为空 | error={}", e.getMessage());
+            return List.of();
+        }
     }
 
     private static final class EffectiveTools {
