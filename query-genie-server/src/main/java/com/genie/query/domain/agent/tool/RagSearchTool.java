@@ -4,14 +4,19 @@ import com.genie.query.domain.agent.citation.CitationItem;
 import com.genie.query.domain.agent.citation.CitationRegistry;
 import com.genie.query.domain.query.model.QueryResultEntry;
 import com.genie.query.domain.qa.service.QaQueryService;
+import com.genie.query.domain.query.service.QueryRewriteService;
 import com.genie.query.domain.vectorstore.SearchMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.genie.query.domain.agent.routing.RecentHistoryHolder;
+import com.genie.query.domain.agent.tool.spi.AgentTool;
+import com.genie.query.domain.agent.tool.spi.AgentToolMeta;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -26,8 +31,9 @@ import java.util.stream.Collectors;
  * @author daicy
  * @date 2026/4/2
  */
+@AgentToolMeta(name = "knowledge", group = "knowledge", forceable = true, toolForceField = "knowledge")
 @Component
-public class RagSearchTool {
+public class RagSearchTool implements AgentTool {
 
     private static final Logger log = LoggerFactory.getLogger(RagSearchTool.class);
 
@@ -37,6 +43,9 @@ public class RagSearchTool {
 
     @Autowired
     private QaQueryService qaQueryService;
+
+    @Autowired(required = false)
+    private QueryRewriteService queryRewriteService;
 
     /**
      * 搜索内部知识库，返回相关文档片段。
@@ -55,8 +64,9 @@ public class RagSearchTool {
         log.info("[RagSearchTool] 开始检索 | question={} | knowledgeCodes={}", question, kbCodes);
 
         try {
+            List<String> queries = resolveQueries(question, kbCodes);
             List<QueryResultEntry> results = qaQueryService.searchWithQueries(
-                    List.of(question),
+                    queries,
                     kbCodes.isEmpty() ? null : kbCodes,
                     SearchMode.HYBRID,
                     DEFAULT_SEARCH_SIZE,
@@ -79,6 +89,31 @@ public class RagSearchTool {
         } catch (Exception e) {
             log.warn("[RagSearchTool] 检索异常: {}", e.getMessage());
             return "知识库检索暂时不可用：" + e.getMessage();
+        }
+    }
+
+    private List<String> resolveQueries(String question, List<String> kbCodes) {
+        if (queryRewriteService == null) return List.of(question);
+        try {
+            List<String> recentHistory = RecentHistoryHolder.get();
+            QueryRewriteService.QueryRewriteContext ctx =
+                    new QueryRewriteService.QueryRewriteContext(
+                            kbCodes.isEmpty() ? null : kbCodes,
+                            recentHistory.isEmpty() ? null : recentHistory);
+            QueryRewriteService.QueryRewriteResult result =
+                    queryRewriteService.generateQueries(question, 3, ctx);
+            List<String> queries = new ArrayList<>();
+            if (result.getMainQuery() != null && !result.getMainQuery().isBlank())
+                queries.add(result.getMainQuery().trim());
+            if (result.getExpandedQueries() != null)
+                result.getExpandedQueries().stream()
+                      .filter(q -> q != null && !q.isBlank())
+                      .map(String::trim)
+                      .forEach(queries::add);
+            return queries.isEmpty() ? List.of(question) : queries;
+        } catch (Exception e) {
+            log.warn("[RagSearchTool] 查询改写失败，降级为原始问题: {}", e.getMessage());
+            return List.of(question);
         }
     }
 

@@ -45,9 +45,6 @@ public class SelfCorrectionLoop {
     @Autowired
     private SqlExecutor sqlExecutor;
 
-    @Autowired
-    private DynamicFewShotService dynamicFewShotService;
-
     /**
      * 执行自修正循环。
      *
@@ -119,8 +116,6 @@ public class SelfCorrectionLoop {
                             "该查询条件下暂无数据，建议扩大时间范围或调整筛选条件");
                 }
 
-                // 执行成功：存入动态 Few-shot 库
-                dynamicFewShotService.saveSuccessfulPair(question, safeSql);
                 log.info("[SelfCorrection] 第 {} 次成功，行数={}", attempt, result.rowCount());
                 return SqlQueryResult.success(safeSql, result, generated.getThought());
 

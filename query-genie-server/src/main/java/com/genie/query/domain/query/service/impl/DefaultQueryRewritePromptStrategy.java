@@ -32,7 +32,17 @@ public class DefaultQueryRewritePromptStrategy implements QueryRewritePromptStra
     @Override
     public String buildUserPrompt(String originalQuestion, QueryRewriteService.QueryRewriteContext context) {
         StringBuilder sb = new StringBuilder();
-        sb.append("用户原始问题：").append(originalQuestion.trim()).append("\n");
+
+        java.util.List<String> historyMessages = context != null ? context.getHistoryMessages() : null;
+        if (historyMessages != null && !historyMessages.isEmpty()) {
+            sb.append("【近期对话上下文】\n");
+            sb.append(String.join("\n", historyMessages));
+            sb.append("\n\n【当前用户问题】\n");
+            sb.append(originalQuestion.trim()).append("\n");
+        } else {
+            sb.append("用户原始问题：").append(originalQuestion.trim()).append("\n");
+        }
+
         if (context != null && context.getKnowledgeCodes() != null && !context.getKnowledgeCodes().isEmpty()) {
             sb.append("可用的知识库编码列表：");
             sb.append(String.join(",", context.getKnowledgeCodes()));

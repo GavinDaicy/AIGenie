@@ -4,12 +4,14 @@
 
 <script>
 import { marked } from 'marked'
+import * as echarts from 'echarts'
 
 /**
  * 引用文本渲染组件：将答案文本中的 [N] 标记渲染为可点击角标，并支持 Markdown 格式。
+ * 同时支持 ```chart JSON ``` 代码块，自动渲染为 ECharts 交互图表。
  *
  * Props:
- *   text      - 原始答案文本（含 [N] 标记，支持 Markdown 语法）
+ *   text      - 原始答案文本（含 [N] 标记、支持 Markdown、支持 chart 代码块）
  *   citations - CitationItem[] 引用数据列表
  *
  * Events:
@@ -18,11 +20,32 @@ import { marked } from 'marked'
 
 const renderer = new marked.Renderer()
 
+renderer.code = function (token) {
+  // marked v15+ 传入 token 对象 {text, lang, raw, escaped}；旧版传入 (code, language) 字符串
+  const code = (token && typeof token === 'object') ? (token.text || '') : (token || '')
+  const language = (token && typeof token === 'object') ? (token.lang || '') : (arguments[1] || '')
+  if (language === 'chart') {
+    const escaped = encodeURIComponent(code)
+    return `<div class="chart-block" data-chart="${escaped}" style="width:100%;height:300px;margin:0.8em 0;border-radius:6px;overflow:hidden;"></div>`
+  }
+  return `<pre><code>${code}</code></pre>`
+}
+
 export default {
   name: 'CitationText',
   props: {
     text: { type: String, default: '' },
     citations: { type: Array, default: () => [] }
+  },
+  mounted() {
+    this._initCharts()
+  },
+  updated() {
+    this._initCharts()
+  },
+  beforeDestroy() {
+    (this._chartInstances || []).forEach(c => { try { c.dispose() } catch (_) {} })
+    this._chartInstances = []
   },
   computed: {
     rendered() {
@@ -54,6 +77,27 @@ export default {
       const idx = parseInt(badge.getAttribute('data-cite'), 10)
       const citation = (this.citations || []).find(c => c.index === idx)
       if (citation) this.$emit('cite-click', citation)
+    },
+    _initCharts() {
+      if (!this.$el) return
+      const blocks = this.$el.querySelectorAll('.chart-block:not([data-chart-init])')
+      if (!blocks.length) return
+      if (!this._chartInstances) this._chartInstances = []
+      blocks.forEach(el => {
+        try {
+          const option = JSON.parse(decodeURIComponent(el.dataset.chart))
+          const chart = echarts.init(el)
+          chart.setOption(option)
+          el.setAttribute('data-chart-init', 'true')
+          this._chartInstances.push(chart)
+          if (typeof ResizeObserver !== 'undefined') {
+            new ResizeObserver(() => { if (chart) chart.resize() }).observe(el)
+          }
+        } catch (e) {
+          el.setAttribute('data-chart-init', 'error')
+          el.innerHTML = '<div style="padding:12px;color:#f56c6c;font-size:13px;">图表数据解析失败</div>'
+        }
+      })
     }
   }
 }

@@ -131,6 +131,13 @@
             <version>1.11.0</version>
         </dependency>
 
+        <!-- 数学表达式计算 -->
+        <dependency>
+            <groupId>net.objecthunter</groupId>
+            <artifactId>exp4j</artifactId>
+            <version>0.4.8</version>
+        </dependency>
+
         <!-- okhttp -->
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>

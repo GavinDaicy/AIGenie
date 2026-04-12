@@ -52,6 +52,8 @@ public class StepEvent {
     private Integer citationIndex;
     /** 本轮所有引用数据（CITATIONS 事件使用） */
     private List<CitationItem> citations;
+    /** 助手消息落库后的 DB 主键（FINAL_ANSWER 事件携带，前端点赞时回传） */
+    private String messageId;
 
     public static StepEvent routing(String questionType, String label) {
         StepEvent e = new StepEvent();
@@ -132,9 +134,14 @@ public class StepEvent {
     }
 
     public static StepEvent finalAnswer(String content) {
+        return finalAnswer(content, null);
+    }
+
+    public static StepEvent finalAnswer(String content, String messageId) {
         StepEvent e = new StepEvent();
         e.type = Type.FINAL_ANSWER;
         e.content = content;
+        e.messageId = messageId;
         e.timestamp = System.currentTimeMillis();
         return e;
     }

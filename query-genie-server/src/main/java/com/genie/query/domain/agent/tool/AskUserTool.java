@@ -1,5 +1,7 @@
 package com.genie.query.domain.agent.tool;
 
+import com.genie.query.domain.agent.tool.spi.AgentTool;
+import com.genie.query.domain.agent.tool.spi.AgentToolMeta;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
@@ -20,8 +22,9 @@ import org.springframework.stereotype.Component;
  *
  * @author daicy
  */
+@AgentToolMeta(name = "askUser", group = "builtin", alwaysLoad = true, forceable = false)
 @Component
-public class AskUserTool {
+public class AskUserTool implements AgentTool {
 
     /** Spring AI 注册的工具名称，与方法名一致，供 Orchestrator 按名称拦截 */
     public static final String TOOL_NAME = "askUser";

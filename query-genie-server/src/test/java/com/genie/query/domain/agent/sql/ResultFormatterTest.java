@@ -124,6 +124,24 @@ class ResultFormatterTest {
         assertThat(table).contains("A\\|B");
     }
 
+    @Test
+    void format_shouldShowTruncationWarning_whenRowsEqualLimit() {
+        QueryResult result = buildResult(List.of("col1"), 500);
+
+        String output = formatter.format(result, SQL);
+
+        assertThat(output).contains("【注意：查询结果已被限制为最多 500 条，实际数据可能更多，请添加更精确的筛选条件后再查询】");
+    }
+
+    @Test
+    void format_shouldNotShowTruncationWarning_whenRowsLessThanLimit() {
+        QueryResult result = buildResult(List.of("col1"), 499);
+
+        String output = formatter.format(result, SQL);
+
+        assertThat(output).doesNotContain("【注意：查询结果已被限制为最多 500 条");
+    }
+
     private QueryResult buildResult(List<String> columns, int rowCount) {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (int i = 0; i < rowCount; i++) {

@@ -2,7 +2,7 @@
 
 An engineering-oriented **AI Q&A** system for enterprise knowledge bases and database-backed scenarios. It covers the full path from document ingestion through hybrid retrieval and streaming answers to multi-tool Agent reasoning, with DDD layering for long-term maintainability.
 
-**Highlights:** multi-format documents (docs, spreadsheets, web pages); field weighting, time decay, hybrid retrieval, query rewrite, multi-turn conversations; ReAct Agent (KB search + SQL query + web search + ask-user); SSE step-by-step streaming; citation tracing.
+**Highlights:** multi-format documents (docs, spreadsheets, web pages); field weighting, time decay, hybrid retrieval, query rewrite, multi-turn conversations; ReAct Agent (KB search + SQL query + precise calculation + web search + ask-user); ECharts data charts; feedback-driven FewShot self-learning; SSE step-by-step streaming; citation tracing.
 
 [中文说明](./README.md)
 
@@ -11,6 +11,8 @@ An engineering-oriented **AI Q&A** system for enterprise knowledge bases and dat
 Screen recording of QueryGenie in use: knowledge base management, retrieval, and streaming Q&A.
 
 ![QueryGenie demo](./demo.gif)
+
+![QueryGenie demo2](./demo1.gif)
 
 ## Why QueryGenie
 
@@ -28,6 +30,8 @@ Many RAG demos run end-to-end but are hard to evolve in production. QueryGenie f
 | Engineering | DDD layering plus architecture guard tests for collaboration and refactors |
 | Product | Hybrid retrieval, rerank, and streaming answers for realistic UX |
 | Agent | ReAct multi-tool loop + ask-user + citation tracing for complex reasoning |
+| Self-learning | User thumbs-up drives FewShot writes to ES; similar questions auto-inject good SQL examples for continuous improvement |
+| Extension | ToolRegistry SPI + middleware chain—add new tools or cross-cutting logic without touching the orchestrator |
 | Evolution | Clear infra abstractions for new model vendors and retrieval backends |
 
 ## Core Features
@@ -44,11 +48,16 @@ Many RAG demos run end-to-end but are hard to evolve in production. QueryGenie f
 - **Semantic routing:** automatically identifies question type (KB / data query / complex) and selects execution strategy  
 - **Execution planning:** LLM decomposes complex questions into a dependency-linked task list  
 - **ReAct loop:** Thought → Action (tool call) → Observation iterative reasoning  
-- **Four tools:** KB search, SQL query (5-step pipeline), web search, ask-user  
+- **Five tools:** KB search, SQL query (5-step pipeline), precise calculation, web search, ask-user  
 - **SQL query:** Schema Linking → Few-Shot → CoT generation → security validation → self-correction loop (≤3 retries) → result formatting  
+- **Precise calculation:** `CalculateTool` powered by exp4j; supports arithmetic, exponentiation, sqrt/log/abs and more; `alwaysLoad=true`  
+- **Data visualization:** Agent emits a ` ```chart ` JSON code block; frontend auto-renders ECharts charts (line, bar, pie, etc.)  
+- **Feedback self-learning:** thumbs-up triggers async FewShot write to ES vector store; similar questions auto-inject high-quality SQL examples on next retrieval  
 - **Web search:** supports Bocha AI / Baidu AI Search / Alibaba IQS / SearXNG—switchable by config  
 - **Citation tracing:** clickable [N] superscripts in answers open a detail drawer for KB / SQL / WEB sources  
 - **SSE step stream:** ROUTING → PLANNING → THINKING → TOOL_CALL → TOOL_RESULT → CITATIONS → FINAL_ANSWER  
+- **Tool SPI:** `AgentToolMeta` annotation + `ToolRegistry`—add a new tool by implementing `AgentTool` and registering it as a Bean, no orchestrator changes needed  
+- **Middleware chain:** `AgentMiddleware` SPI + `MiddlewareChain`—cross-cutting concerns (history injection, planning, ask-user pause, title update) encapsulated independently  
 
 ## System Architecture
 
@@ -97,7 +106,8 @@ flowchart TD
   TC --> T2["querySql\nSqlQueryTool"]
   TC --> T3["searchWeb\nWebSearchTool"]
   TC --> T4["askUser\nAskUserTool"]
-  T1 & T2 & T3 --> CR["CitationRegistry\nwrite citation (ThreadLocal)"]
+  TC --> T5["calculateExpression\nCalculateTool"]
+  T1 & T2 & T3 & T5 --> CR["CitationRegistry\nwrite citation (ThreadLocal)"]
   T4 -->|signal pause| AU["Push ASK_USER SSE\nwait for user reply"]
   CR --> OBS["Observation aggregation"]
   OBS --> TH
@@ -144,8 +154,9 @@ AIGenie/
 | `src/views/Query.vue` | SQL query test page |
 | `src/views/DatasourceList.vue` | Data source management page |
 | `src/views/TableSchemaList.vue` / `TableSchemaEdit.vue` | Table schema management pages |
-| `src/components/CitationText.vue` | Renders [N] superscripts in answers (clickable, emits cite-click) |
+| `src/components/CitationText.vue` | Renders [N] superscripts in answers (clickable, emits cite-click); intercepts ` ```chart ` blocks and renders ECharts charts |
 | `src/components/CitationDrawer.vue` | Citation source drawer (KB / SQL / WEB type-specific styles) |
+| `src/components/ChartRenderer.vue` | ECharts chart wrapper (ResizeObserver auto-resize, reactive option prop) |
 | `src/api/` | Backend API wrappers (`agent.js` / `qa.js` / `session.js` / `knowledge.js`, etc.) |
 | `src/router/` | Vue Router configuration |
 
@@ -156,6 +167,7 @@ AIGenie/
 | Class | Purpose |
 |-------|---------|
 | `AgentController` | `POST /agent/ask/stream` — SSE streaming Agent Q&A, 120 s timeout |
+| `FeedbackController` | `POST /agent/feedback` — receives thumbs-up/down, triggers async FewShot write |
 | `QaController` | RAG Q&A, streaming answer, history query |
 | `KnowledgeController` | KB CRUD + publish management |
 | `DocumentController` | Document upload and parse task management |
@@ -168,6 +180,7 @@ AIGenie/
 | Class | Purpose |
 |-------|---------|
 | `AgentApplication` | Agent request dispatch, message persistence (with `citationsJson`), session title update |
+| `FeedbackApplication` | Feedback handling: sync DB write + on thumbs-up async extract SQL citation → rewrite question → write FewShot pair to ES vector store |
 | `QaApplication` | RAG Q&A use-case orchestration (retrieval → rerank → LLM → streaming) |
 | `SessionApplication` | Session / message list query, historical citation parsing (backward-compatible with QA sources) |
 | `DocumentApplication` | Document ingestion ETL orchestration |
@@ -182,9 +195,11 @@ AIGenie/
 | `agent/routing/` | Semantic routing: `SemanticRouter` (keyword rules + LLM fallback), `QuestionType` (KNOWLEDGE / DATA_QUERY / COMPLEX) |
 | `agent/planning/` | Execution planning: `PlannerService` / `DefaultPlannerService` (LLM JSON output), `ExecutionPlan` (task dependency chain + `toTaskListHint()`) |
 | `agent/orchestration/` | ReAct orchestration: `AgentOrchestrator` / `AgentOrchestratorImpl` (reasoning loop + streaming LLM), `AgentContext`, `AgentResult` (finalAnswer + citations), `ContextWindowManager` (multi-turn token compression) |
-| `agent/tool/` | Agent tools: `RagSearchTool` (KB search), `WebSearchTool` (web search, `@ConditionalOnBean`), `AskUserTool` (ask-user via signal string pause) |
+| `agent/tool/` | Agent tools: `RagSearchTool` (KB search), `WebSearchTool` (web search, `@ConditionalOnBean`), `AskUserTool` (ask-user via signal string pause), `CalculateTool` (precise math via exp4j, `alwaysLoad=true`) |
+| `agent/tool/spi/` | Tool SPI: `AgentTool` interface, `AgentToolMeta` annotation (name / group / alwaysLoad / forceable / toolForceField); `ToolRegistry` filters by business conditions and ToolForce reflection |
+| `agent/middleware/` | Middleware chain: `AgentMiddleware` (SPI, before / after / onAskUserPause), `MiddlewareChain` (order-sorted execution); 4 built-in impls: `HistoryInjectMiddleware`, `PlanningMiddleware`, `PausedContextMiddleware`, `TitleMiddleware` |
 | `agent/tool/sql/` | SQL tool entry point: `SqlQueryTool` (pipeline orchestrator), `SqlExecutor` (interface) |
-| `agent/tool/sql/pipeline/` | SQL 5-step pipeline: `SchemaLinkingService`, `DynamicFewShotService`, `SqlGenerationService` (CoT), `SqlSecurityValidator`, `SelfCorrectionLoop` (EXPLAIN + retry), `ResultFormatter`, `SchemaContextBuilder` |
+| `agent/tool/sql/pipeline/` | SQL 5-step pipeline: `SchemaLinkingService`, `DynamicFewShotService` (ES kNN retrieval of historical Q→SQL pairs, controlled by `app.fewshot.es.enabled`), `SqlGenerationService` (CoT), `SqlSecurityValidator`, `SelfCorrectionLoop` (EXPLAIN + retry), `ResultFormatter`, `SchemaContextBuilder` |
 | `agent/event/` | SSE step events: `StepEvent` (ROUTING / PLANNING / THINKING / THOUGHT_CHUNK / TOOL_CALL / TOOL_RESULT / ASK_USER / CITATIONS / FINAL_ANSWER / ERROR), `StepEventPublisher` |
 | `agent/citation/` | Citation registry: `CitationRegistry` (ThreadLocal write / drainAndClear), `CitationItem` (unified KB / SQL / WEB model) |
 | `agent/search/` | Web search domain interfaces: `WebSearchProvider`, `WebSearchResult` |
@@ -229,11 +244,15 @@ AIGenie/
 | QA UX | SSE streaming + multi-turn sessions | Production-like user experience |
 | Agent routing | Keyword rules + LLM fallback | Auto-classifies KB / data query / complex |
 | Agent planning | LLM JSON task dependency chain | Complex questions decomposed into ordered subtasks |
-| Agent tools | KB search / SQL query / web search / ask-user | ReAct multi-turn reasoning loop |
+| Agent tools | KB search / SQL query / precise calculation / web search / ask-user | ReAct multi-turn reasoning loop |
 | SQL generation | CoT + self-correction ≤3× + security validation | Schema Linking + EXPLAIN verification |
+| Data visualization | ECharts charts (line / bar / pie) | Agent emits ` ```chart ` block, frontend auto-renders |
 | Web search | Bocha / Baidu / Alibaba / SearXNG | Provider switchable by config, optional |
+| Feedback self-learning | Thumbs-up → FewShot → ES vector store | Similar questions auto-inject SQL examples; accuracy improves continuously |
 | Citation tracing | [N] superscript + drawer detail | KB / SQL / WEB three-type citations |
 | Architecture | DDD layers + ArchUnit constraints | Easier extension and long-term maintenance |
+| Tool extension | ToolRegistry SPI + `@AgentToolMeta` | Add a tool by implementing an interface and registering a Bean—no orchestrator changes |
+| Middleware extension | `AgentMiddleware` SPI + `MiddlewareChain` | Cross-cutting concerns independently encapsulated, ordered flexibly |
 
 ## Architecture Value
 
@@ -254,6 +273,9 @@ The project includes an ArchUnit test to enforce layering boundaries:
 - Keep domain logic out of ad-hoc controller code  
 - Preserve extensibility for model, retrieval, and cache replacements  
 - Goes beyond RAG with a complete Agent reasoning chain (routing → planning → ReAct → tools → citation tracing)  
+- Pluggable tools (SPI registration)—add new tools without modifying the orchestrator  
+- Middleware chain decouples cross-cutting concerns (history injection, planning, ask-user pause, title generation) with flexible ordering  
+- Feedback flywheel: thumbs-up → FewShot write to ES → next similar question auto-injects example SQL → continuous improvement  
 
 ## Quick Start (10 minutes)
 
@@ -293,6 +315,13 @@ To enable web search (one of the Agent tools), optionally set:
 export APP_WEB_SEARCH_ENABLED=true
 export APP_WEB_SEARCH_PROVIDER=bocha   # bocha / baidu / ali / searxng
 export BOCHA_API_KEY=your-bocha-api-key
+```
+
+To enable SQL FewShot self-learning (thumbs-up drives ES vector store), optionally set:
+
+```bash
+export APP_FEWSHOT_ES_ENABLED=true
+export APP_FEWSHOT_ES_TOP_K=3   # max examples injected per query
 ```
 
 ### 3) Start dependencies and init DB

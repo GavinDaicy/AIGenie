@@ -15,6 +15,8 @@ import com.genie.query.domain.schema.dao.DbTableSchemaDAO;
 import com.genie.query.domain.schema.model.DbTableSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.genie.query.domain.agent.tool.spi.AgentTool;
+import com.genie.query.domain.agent.tool.spi.AgentToolMeta;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,8 +45,9 @@ import java.util.stream.Collectors;
  * @author daicy
  * @date 2026/4/2
  */
+@AgentToolMeta(name = "sql", group = "data", forceable = true, toolForceField = "sql")
 @Component
-public class SqlQueryTool {
+public class SqlQueryTool implements AgentTool {
 
     private static final Logger log = LoggerFactory.getLogger(SqlQueryTool.class);
 
@@ -118,10 +121,10 @@ public class SqlQueryTool {
         }
 
         // Step 2前：构建详细 Schema 上下文（含字段别名 + sample_values）
-        String schemaContext = schemaContextBuilder.buildSchemaContext(
-                linkedTables, linking.getColumns());
+        // LLM 仅用于识别相关表，Schema 包含命中表的全部字段，避免 LLM 列召回不全导致 SQL 生成失败
+        String schemaContext = schemaContextBuilder.buildSchemaContext(linkedTables);
 
-        // Step 2前：动态 Few-shot 检索（迭代2暂返回空）
+        // Step 2前：动态 Few-shot 检索（ES kNN 向量检索，未启用时返回空字符串）
         String fewShot = dynamicFewShotService.retrieve(question, FEW_SHOT_TOP_K);
 
         // 白名单：只允许已注册表

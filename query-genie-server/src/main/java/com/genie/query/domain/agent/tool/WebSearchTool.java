@@ -7,6 +7,8 @@ import com.genie.query.domain.agent.search.WebSearchResult;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.genie.query.domain.agent.tool.spi.AgentTool;
+import com.genie.query.domain.agent.tool.spi.AgentToolMeta;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,8 +25,9 @@ import java.util.List;
  *
  * @author daicy
  */
+@AgentToolMeta(name = "webSearch", group = "search", forceable = true, toolForceField = "webSearch")
 @Component
-public class WebSearchTool {
+public class WebSearchTool implements AgentTool {
 
     private static final Logger log = LoggerFactory.getLogger(WebSearchTool.class);
 

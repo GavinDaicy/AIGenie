@@ -2,7 +2,7 @@
 
 面向企业知识库与数据库场景的 **AI 问答** 工程化项目：覆盖文档入库、混合检索、流式问答到多工具 Agent 推理的完整链路，并以 DDD 分层保证长期可扩展性。
 
-**能力概览：** 多格式文档（文档、表格、网页等）；字段权重、时间衰减、混合检索、查询改写、多轮会话；ReAct Agent（知识库检索 + SQL 查询 + 网页搜索 + 追问用户）；SSE 流式步骤推送；引用溯源。
+**能力概览：** 多格式文档（文档、表格、网页等）；字段权重、时间衰减、混合检索、查询改写、多轮会话；ReAct Agent（知识库检索 + SQL 查询 + 精确计算 + 网页搜索 + 追问用户）；ECharts 数据图表；反馈驱动 FewShot 自学习；SSE 流式步骤推送；引用溯源。
 
 [English README](./README.en.md)
 
@@ -11,6 +11,8 @@
 以下为 QueryGenie 在实际界面中的操作与问答效果录屏（知识库管理、检索与流式回答等）。
 
 ![QueryGenie 软件效果演示](./demo.gif)
+
+![QueryGenie 软件效果演示2](./demo1.gif)
 
 ## 为什么做这个项目
 
@@ -28,6 +30,8 @@
 | 工程价值 | DDD 分层 + 架构守卫测试，便于协作与长期重构 |
 | 业务价值 | 混合召回、Rerank、流式回答，贴近真实问答体验 |
 | Agent 价值 | ReAct 多工具循环 + 追问机制 + 引用溯源，覆盖复杂问题推理场景 |
+| 自学习价值 | 用户点赞驱动 FewShot 写入 ES，相似问题自动注入优质 SQL 示例，持续提升准确率 |
+| 扩展价值 | ToolRegistry SPI + 中间件管道，添加新工具或横切逻辑无需修改编排器 |
 | 演进价值 | 基础设施抽象清晰，便于扩展模型供应商与检索后端 |
 
 ## 核心能力
@@ -44,11 +48,16 @@
 - **语义路由**：自动识别问题类型（知识库 / 数据查询 / 复杂），选择执行策略  
 - **执行规划**：复杂问题 LLM 拆解为带依赖的子任务列表  
 - **ReAct 循环**：Thought → Action（工具调用）→ Observation 迭代推理  
-- **四类工具**：知识库检索、SQL 查询（5步流水线）、网页搜索、追问用户  
+- **五类工具**：知识库检索、SQL 查询（5步流水线）、精确计算、网页搜索、追问用户  
 - **SQL 查询**：Schema Linking → Few-Shot → CoT 生成 → 安全校验 → 自修正循环（≤3次）→ 结果格式化  
+- **精确计算**：`CalculateTool` 基于 exp4j，支持四则运算、幂、sqrt/log/abs 等，`alwaysLoad=true` 始终启用  
+- **数据可视化**：Agent 输出 ` ```chart ` JSON 代码块，前端自动渲染 ECharts 图表（折线、柱状、饼图等）  
+- **反馈自学习**：用户点赞触发异步 FewShot 写入 ES 向量库，相似问题检索后自动注入优质 SQL 示例  
 - **网页搜索**：支持 博查AI / 百度AI搜索 / 阿里IQS / SearXNG 多供应商切换  
 - **引用溯源**：答案中 [N] 角标可点击，展示对应 KB / SQL / WEB 来源详情  
 - **SSE 步骤流**：ROUTING → PLANNING → THINKING → TOOL_CALL → TOOL_RESULT → CITATIONS → FINAL_ANSWER  
+- **工具 SPI**：`AgentToolMeta` 注解 + `ToolRegistry`，新增工具只需实现 `AgentTool` 并注册为 Bean  
+- **中间件管道**：`AgentMiddleware` SPI + `MiddlewareChain`，横切关注点（历史注入、规划、追问暂停、标题生成）独立封装  
 
 ## 系统架构
 
@@ -97,7 +106,8 @@ flowchart TD
   TC --> T2["querySql\nSqlQueryTool"]
   TC --> T3["searchWeb\nWebSearchTool"]
   TC --> T4["askUser\nAskUserTool"]
-  T1 & T2 & T3 --> CR["CitationRegistry\n写入引用（ThreadLocal）"]
+  TC --> T5["calculateExpression\nCalculateTool"]
+  T1 & T2 & T3 & T5 --> CR["CitationRegistry\n写入引用（ThreadLocal）"]
   T4 -->|信号暂停| AU["推送 ASK_USER SSE\n等待用户续跑"]
   CR --> OBS["Observation 汇总"]
   OBS --> TH
@@ -144,8 +154,9 @@ AIGenie/
 | `src/views/Query.vue` | SQL 查询测试页 |
 | `src/views/DatasourceList.vue` | 数据源管理页 |
 | `src/views/TableSchemaList.vue` / `TableSchemaEdit.vue` | 表结构 Schema 管理页 |
-| `src/components/CitationText.vue` | 答案中 [N] 角标渲染（可点击，emit cite-click） |
+| `src/components/CitationText.vue` | 答案中 [N] 角标渲染（可点击，emit cite-click）；拦截 ` ```chart ` 代码块渲染 ECharts 图表 |
 | `src/components/CitationDrawer.vue` | 引用来源抽屉（KB / SQL / WEB 三类型样式） |
+| `src/components/ChartRenderer.vue` | ECharts 图表封装（ResizeObserver 自适应宽度，支持 option prop 热更新） |
 | `src/api/` | 后端接口封装（`agent.js` / `qa.js` / `session.js` / `knowledge.js` 等） |
 | `src/router/` | Vue Router 路由配置 |
 
@@ -156,6 +167,7 @@ AIGenie/
 | 类 | 说明 |
 |------|------|
 | `AgentController` | `POST /agent/ask/stream`，SSE 流式 Agent 问答，120s 超时 |
+| `FeedbackController` | `POST /agent/feedback`，接收用户点赞/踩，触发 FewShot 异步写入 |
 | `QaController` | RAG 问答、流式回答、历史消息查询 |
 | `KnowledgeController` | 知识库 CRUD + 发布管理 |
 | `DocumentController` | 文档上传、解析任务管理 |
@@ -168,6 +180,7 @@ AIGenie/
 | 类 | 说明 |
 |------|------|
 | `AgentApplication` | Agent 请求路由分派、消息落库（含 `citationsJson`）、会话标题更新 |
+| `FeedbackApplication` | 反馈处理：同步落库 + 好评时异步提取 SQL citation → 问题改写 → FewShot 写入 ES 向量库 |
 | `QaApplication` | RAG 问答用例编排（检索 → Rerank → LLM → 流式回答） |
 | `SessionApplication` | 会话 / 消息列表查询、历史引用解析（兼容旧 QA sources） |
 | `DocumentApplication` | 文档入库 ETL 流程编排 |
@@ -182,9 +195,11 @@ AIGenie/
 | `agent/routing/` | 语义路由：`SemanticRouter`（关键词规则 + LLM 兜底），`QuestionType`（KNOWLEDGE / DATA_QUERY / COMPLEX） |
 | `agent/planning/` | 执行规划：`PlannerService` / `DefaultPlannerService`（LLM JSON 输出），`ExecutionPlan`（任务依赖链 + `toTaskListHint()`） |
 | `agent/orchestration/` | ReAct 编排：`AgentOrchestrator` / `AgentOrchestratorImpl`（推理循环 + 流式 LLM），`AgentContext`，`AgentResult`（finalAnswer + citations），`ContextWindowManager`（多轮 Token 压缩） |
-| `agent/tool/` | Agent 工具：`RagSearchTool`（KB 检索）、`WebSearchTool`（网页搜索，`@ConditionalOnBean`）、`AskUserTool`（追问，信号字符串暂停） |
+| `agent/tool/` | Agent 工具：`RagSearchTool`（KB 检索）、`WebSearchTool`（网页搜索，`@ConditionalOnBean`）、`AskUserTool`（追问，信号字符串暂停）、`CalculateTool`（精确计算，exp4j，`alwaysLoad=true`） |
+| `agent/tool/spi/` | 工具 SPI：`AgentTool` 接口、`AgentToolMeta` 注解（name / group / alwaysLoad / forceable / toolForceField）；`ToolRegistry` 按条件过滤，支持 ToolForce 反射禁用 |
+| `agent/middleware/` | 中间件管道：`AgentMiddleware`（SPI，before / after / onAskUserPause）、`MiddlewareChain`（order 排序执行）；4 个内置实现：`HistoryInjectMiddleware`、`PlanningMiddleware`、`PausedContextMiddleware`、`TitleMiddleware` |
 | `agent/tool/sql/` | SQL 工具入口：`SqlQueryTool`（四步编排总调用），`SqlExecutor`（接口） |
-| `agent/tool/sql/pipeline/` | SQL 5 步流水线：`SchemaLinkingService`、`DynamicFewShotService`、`SqlGenerationService`（CoT）、`SqlSecurityValidator`、`SelfCorrectionLoop`（EXPLAIN + 重试）、`ResultFormatter`、`SchemaContextBuilder` |
+| `agent/tool/sql/pipeline/` | SQL 5 步流水线：`SchemaLinkingService`、`DynamicFewShotService`（ES kNN 检索历史成功 Q→SQL 对，受 `app.fewshot.es.enabled` 开关控制）、`SqlGenerationService`（CoT）、`SqlSecurityValidator`、`SelfCorrectionLoop`（EXPLAIN + 重试）、`ResultFormatter`、`SchemaContextBuilder` |
 | `agent/event/` | SSE 步骤事件：`StepEvent`（ROUTING / PLANNING / THINKING / THOUGHT_CHUNK / TOOL_CALL / TOOL_RESULT / ASK_USER / CITATIONS / FINAL_ANSWER / ERROR），`StepEventPublisher` |
 | `agent/citation/` | 引用注册：`CitationRegistry`（ThreadLocal 写入 / drainAndClear），`CitationItem`（KB / SQL / WEB 统一模型） |
 | `agent/search/` | 网页搜索领域接口：`WebSearchProvider`、`WebSearchResult` |
@@ -229,11 +244,15 @@ AIGenie/
 | 问答体验 | SSE 流式 + 多轮会话 | 接近生产态的人机交互体验 |
 | Agent 路由 | 关键词规则 + LLM 兜底 | 自动识别知识库 / 数据查询 / 复杂问题 |
 | Agent 规划 | LLM JSON 任务依赖链 | 复杂问题拆解为有序子任务 |
-| Agent 工具 | KB 检索 / SQL 查询 / 网页搜索 / 追问 | ReAct 循环多轮推理 |
+| Agent 工具 | KB 检索 / SQL 查询 / 精确计算 / 网页搜索 / 追问 | ReAct 循环多轮推理 |
 | SQL 生成 | CoT + 自修正 ≤3次 + 安全校验 | Schema Linking + EXPLAIN 验证 |
+| 数据可视化 | ECharts 图表（折线 / 柱状 / 饼图） | Agent 输出 ` ```chart ` 代码块，前端自动渲染 |
 | 网页搜索 | 博查 / 百度 / 阿里 / SearXNG | 按配置切换供应商，可选关闭 |
+| 反馈自学习 | 点赞驱动 FewShot → ES 向量库 | 相似问题自动注入优质 SQL 示例，持续提升准确率 |
 | 引用溯源 | [N] 角标 + 抽屉详情 | KB / SQL / WEB 三类型引用 |
 | 架构设计 | DDD 分层 + ArchUnit 约束 | 便于二次开发与长期维护 |
+| 工具扩展 | ToolRegistry SPI + `@AgentToolMeta` | 新增工具只需实现接口并注册 Bean，无需改编排器 |
+| 中间件扩展 | `AgentMiddleware` SPI + `MiddlewareChain` | 横切关注点独立封装，按 order 灵活编排 |
 
 ## 架构设计价值
 
@@ -254,6 +273,9 @@ AIGenie/
 - 不把业务规则耦合在控制层，降低维护成本  
 - 不绑定单一实现，方便未来替换 ES、模型或缓存方案  
 - 超越 RAG，提供完整 Agent 推理链路（路由 → 规划 → ReAct → 工具 → 引用溯源）  
+- 工具可插拔（SPI 注册），添加新工具无需修改编排器  
+- 中间件管道解耦横切关注点（历史注入、任务规划、追问暂停、标题生成），按 order 灵活组合  
+- 反馈闭环设计：用户点赞 → FewShot 写入 ES → 下次相似问题自动注入示例 SQL，形成持续改进飞轮  
 
 ## 10 分钟快速体验
 
@@ -293,6 +315,13 @@ export OPENAI_API_KEY=your-openai-compatible-api-key
 export APP_WEB_SEARCH_ENABLED=true
 export APP_WEB_SEARCH_PROVIDER=bocha   # bocha / baidu / ali / searxng
 export BOCHA_API_KEY=your-bocha-api-key
+```
+
+如启用 SQL FewShot 自学习（用户点赞驱动 ES 向量库），可选配：
+
+```bash
+export APP_FEWSHOT_ES_ENABLED=true
+export APP_FEWSHOT_ES_TOP_K=3   # 每次注入的最多示例数
 ```
 
 ### 3) 拉起依赖并初始化数据库

@@ -35,8 +35,9 @@ export function agentAskStream(params, options = {}) {
       }
       try {
         const event = JSON.parse(raw)
-        if (event.type === 'FINAL_ANSWER' && onChunk) {
-          onChunk(event.content || '')
+        if (event.type === 'FINAL_ANSWER') {
+          if (onChunk) onChunk(event.content || '')
+          if (onStep) onStep(event)
         } else if (onStep) {
           onStep(event)
         }
@@ -63,7 +64,10 @@ export function agentAskStream(params, options = {}) {
 
 /**
  * 提交 Agent 回答评分反馈
+ * @param {string} messageId - 关联的消息 ID
+ * @param {string} sessionId - 会话 ID
+ * @param {number} rating - 1=点赞, -1=踩
+ * @param {string} [comment=''] - 可选文字反馈
  */
-export function submitFeedback(data) {
-  return request.post('/agent/feedback', data)
-}
+export const submitFeedback = (messageId, sessionId, rating, comment = '') =>
+  request.post('/agent/feedback', { messageId, sessionId, rating, comment })

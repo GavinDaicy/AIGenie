@@ -1,5 +1,7 @@
 package com.genie.query.domain.agent.routing;
 
+import java.util.List;
+
 /**
  * 语义路由器：对用户问题进行轻量分类，决定走 RAG、SQL Agent 还是完整 ReAct Agent。
  *
@@ -13,10 +15,21 @@ package com.genie.query.domain.agent.routing;
 public interface SemanticRouter {
 
     /**
-     * 对用户问题进行语义分类。
+     * 对用户问题进行语义分类（不带历史上下文，向后兼容）。
      *
      * @param question 用户输入的自然语言问题
      * @return 问题类型枚举，决定后续路由方向
      */
-    QuestionType route(String question);
+    default QuestionType route(String question) {
+        return route(question, List.of());
+    }
+
+    /**
+     * 对用户问题进行语义分类，携带最近对话历史以解决指代消解问题。
+     *
+     * @param question      用户输入的自然语言问题
+     * @param recentHistory 最近对话历史，格式：["用户：xxx", "助手：yyy"]，可为空
+     * @return 问题类型枚举，决定后续路由方向
+     */
+    QuestionType route(String question, List<String> recentHistory);
 }

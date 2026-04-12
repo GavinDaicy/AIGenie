@@ -11,6 +11,9 @@ import com.genie.query.domain.agent.event.StepEventPublisher;
 import com.genie.query.domain.chat.dao.ChatMessageDAO;
 import com.genie.query.domain.chat.model.ChatMessage;
 
+import com.genie.query.domain.agent.PendingMessageIdHolder;
+import com.genie.query.domain.agent.routing.RecentHistoryHolder;
+import com.genie.query.infrastructure.util.snowflake.SnowflakeIdUtils;
 import org.apache.commons.collections4.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.io.PrintWriter;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -50,9 +54,6 @@ public class AgentApplication {
     @Autowired(required = false)
     private ChatMessageDAO chatMessageDAO;
 
-    @Autowired(required = false)
-    private SessionApplication sessionApplication;
-
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String buildRoutingLabel(QuestionType type) {
@@ -67,33 +68,48 @@ public class AgentApplication {
      * 处理 Agent 问答请求，通过 SSE 实时推送推理步骤与最终答案。
      *
      * @param request 用户请求（含问题、会话ID、可用知识库和数据源）
-     * @param emitter SSE 推送器（由 Controller 层创建并传入）
+     * @param writer  SSE 推送器（由 Controller 层创建并传入）
      */
     public void handleQuestion(AgentAskRequest request, PrintWriter writer) {
         String question = request.getQuestion();
         String sessionId = request.getSessionId();
-        List<String> knowledgeCodes = request.getKnowledgeCodes();
-        List<Long> datasourceIds = request.getDatasourceIds();
+        List<String> knowledgeCodes = CollectionUtils.isEmpty(request.getKnowledgeCodes()) ? null : request.getKnowledgeCodes();
+        List<Long> datasourceIds = CollectionUtils.isEmpty(request.getDatasourceIds()) ? null : request.getDatasourceIds();
         AgentAskRequest.ToolForce toolForce = request.getToolForce();
 
-        // null代表查全部，empty代表不查询，前端传空，默认查全部，禁用是由后端处理的规则
-        knowledgeCodes = CollectionUtils.isEmpty(knowledgeCodes) ? null : knowledgeCodes;
-        datasourceIds = CollectionUtils.isEmpty(datasourceIds) ? null : datasourceIds;
-
-        // 语义路由分类：先推送"识别中"状态
-        stepEventPublisher.publish(writer, StepEvent.planning("正在识别问题意图…"));
-        QuestionType questionType;
+        List<String> recentHistory = loadRecentHistory(sessionId, 2);
+        RecentHistoryHolder.set(recentHistory);
+        String pendingMessageId = SnowflakeIdUtils.getNextStringId();
+        PendingMessageIdHolder.set(pendingMessageId);
         try {
-            questionType = semanticRouter.route(question);
-            log.info("[AgentApplication] 路由结果 | type={} | question={}", questionType, question);
+            QuestionType questionType = routeQuestion(question, recentHistory, writer);
+            EffectiveTools tools = resolveEffectiveTools(questionType, datasourceIds, knowledgeCodes, toolForce);
+            AgentResult agentResult = executeAgent(question, sessionId, tools, toolForce, writer);
+            persistConversation(sessionId, question, agentResult);
+        } finally {
+            RecentHistoryHolder.clear();
+            PendingMessageIdHolder.clear();
+        }
+    }
+
+    private QuestionType routeQuestion(String question, List<String> recentHistory, PrintWriter writer) {
+        stepEventPublisher.publish(writer, StepEvent.planning("正在识别问题意图…"));
+        QuestionType type;
+        try {
+            type = semanticRouter.route(question, recentHistory);
+            log.info("[AgentApplication] 路由结果 | type={} | question={}", type, question);
         } catch (Exception e) {
             log.warn("[AgentApplication] 语义路由异常，兜底 COMPLEX | error={}", e.getMessage());
-            questionType = QuestionType.COMPLEX;
+            type = QuestionType.COMPLEX;
         }
-        // 推送意图识别结果
-        stepEventPublisher.publish(writer, StepEvent.routing(questionType.name(), buildRoutingLabel(questionType)));
+        stepEventPublisher.publish(writer, StepEvent.routing(type.name(), buildRoutingLabel(type)));
+        return type;
+    }
 
-        // 根据路由结果调整工具配置
+    private EffectiveTools resolveEffectiveTools(QuestionType questionType,
+                                                 List<Long> datasourceIds,
+                                                 List<String> knowledgeCodes,
+                                                 AgentAskRequest.ToolForce toolForce) {
         List<Long> effectiveDatasourceIds = datasourceIds;
         List<String> effectiveKnowledgeCodes = knowledgeCodes;
 
@@ -103,83 +119,120 @@ public class AgentApplication {
             effectiveKnowledgeCodes = List.of(); // DATA_QUERY 路由不开放知识库
         }
 
-        // toolForce 覆盖（优先级高于路由结果）
         if (toolForce != null) {
             if (Boolean.FALSE.equals(toolForce.getSql())) {
-                // 强制禁用 SQL：清空数据源列表
                 effectiveDatasourceIds = List.of();
             } else if (Boolean.TRUE.equals(toolForce.getSql()) && CollectionUtils.isEmpty(effectiveDatasourceIds)) {
-                // 强制启用 SQL：路由屏蔽了数据源时恢复为 null（使用全部）
-                effectiveDatasourceIds = null;
+                effectiveDatasourceIds = null; // 强制启用：路由屏蔽时恢复使用全部
             }
             if (Boolean.FALSE.equals(toolForce.getKnowledge())) {
-                // 强制禁用知识库：清空知识库列表
                 effectiveKnowledgeCodes = List.of();
             } else if (Boolean.TRUE.equals(toolForce.getKnowledge()) && CollectionUtils.isEmpty(effectiveKnowledgeCodes)) {
-                // 强制启用知识库：路由屏蔽了知识库时恢复为 null（使用全部）
-                effectiveKnowledgeCodes = null;
+                effectiveKnowledgeCodes = null; // 强制启用：路由屏蔽时恢复使用全部
             }
             log.info("[AgentApplication] toolForce 覆盖已应用 | web={} knowledge={} sql={}",
                     toolForce.getWebSearch(), toolForce.getKnowledge(), toolForce.getSql());
         }
 
-        // 执行 Agent
-        AgentResult agentResult = null;
+        return new EffectiveTools(effectiveKnowledgeCodes, effectiveDatasourceIds);
+    }
+
+    private AgentResult executeAgent(String question, String sessionId,
+                                     EffectiveTools tools,
+                                     AgentAskRequest.ToolForce toolForce,
+                                     PrintWriter writer) {
         try {
-            agentResult = agentOrchestrator.execute(
+            return agentOrchestrator.execute(
                     question, sessionId,
-                    effectiveKnowledgeCodes, effectiveDatasourceIds,
-                    toolForce,
-                    writer);
+                    tools.knowledgeCodes, tools.datasourceIds,
+                    toolForce, writer);
         } catch (Exception e) {
             log.error("[AgentApplication] Agent执行异常 | error={}", e.getMessage(), e);
             stepEventPublisher.publish(writer, StepEvent.error("系统错误: " + e.getMessage()));
             stepEventPublisher.sendDone(writer);
+            return null;
         }
-        String finalAnswer = agentResult != null ? agentResult.getFinalAnswer() : null;
+    }
 
-        // 持久化用户消息（无论是否有最终答案，user 消息均落库）
-        if (sessionId != null && chatMessageDAO != null) {
-            try {
-                int nextOrder = chatMessageDAO.countBySessionId(sessionId);
-
-                ChatMessage userMsg = new ChatMessage();
-                userMsg.setSessionId(sessionId);
-                userMsg.setRole("user");
-                userMsg.setContent(question);
-                userMsg.setSortOrder(nextOrder);
-                chatMessageDAO.insert(userMsg);
-
-                // 首轮对话更新会话标题
-                if (nextOrder == 0 && sessionApplication != null) {
-                    String title = question.length() > 30 ? question.substring(0, 30) + "..." : question;
-                    sessionApplication.updateSessionTitle(sessionId, title);
-                }
-
-                // 有最终答案时才持久化 assistant 消息（追问场景 finalAnswer 为 null）
-                if (finalAnswer != null) {
-                    ChatMessage assistantMsg = new ChatMessage();
-                    assistantMsg.setSessionId(sessionId);
-                    assistantMsg.setRole("assistant");
-                    assistantMsg.setContent(finalAnswer);
-                    assistantMsg.setSortOrder(nextOrder + 1);
-                    assistantMsg.setSources("[]");
-                    if (agentResult != null && !agentResult.getCitations().isEmpty()) {
-                        try {
-                            assistantMsg.setCitationsJson(
-                                    objectMapper.writeValueAsString(agentResult.getCitations()));
-                        } catch (Exception jsonEx) {
-                            log.warn("[AgentApplication] citations 序列化失败 | error={}", jsonEx.getMessage());
-                        }
-                    }
-                    chatMessageDAO.insert(assistantMsg);
-                    log.info("[AgentApplication] 对话已落库 | sessionId={}", sessionId);
-                } else {
-                    log.info("[AgentApplication] Agent 暂停（追问），仅落库 user 消息 | sessionId={}", sessionId);
-                }
-            } catch (Exception e) {
-                log.warn("[AgentApplication] 对话落库失败 | error={}", e.getMessage());
+    private void persistConversation(String sessionId, String question, AgentResult agentResult) {
+        if (sessionId == null || chatMessageDAO == null) return;
+        try {
+            int nextOrder = chatMessageDAO.countBySessionId(sessionId);
+            persistUserMessage(sessionId, question, nextOrder);
+            String finalAnswer = agentResult != null ? agentResult.getFinalAnswer() : null;
+            if (finalAnswer != null) {
+                persistAssistantMessage(sessionId, finalAnswer, agentResult, nextOrder + 1);
+                log.info("[AgentApplication] 对话已落库 | sessionId={}", sessionId);
+            } else {
+                log.info("[AgentApplication] Agent 暂停（追问），仅落库 user 消息 | sessionId={}", sessionId);
             }
+        } catch (Exception e) {
+            log.warn("[AgentApplication] 对话落库失败 | error={}", e.getMessage());
+        }
+    }
+
+    private void persistUserMessage(String sessionId, String question, int sortOrder) {
+        ChatMessage userMsg = new ChatMessage();
+        userMsg.setSessionId(sessionId);
+        userMsg.setRole("user");
+        userMsg.setContent(question);
+        userMsg.setSortOrder(sortOrder);
+        chatMessageDAO.insert(userMsg);
+    }
+
+    private void persistAssistantMessage(String sessionId, String finalAnswer,
+                                         AgentResult agentResult, int sortOrder) {
+        ChatMessage assistantMsg = new ChatMessage();
+        String messageId = PendingMessageIdHolder.get();
+        if (messageId != null) {
+            assistantMsg.setId(messageId);
+        }
+        assistantMsg.setSessionId(sessionId);
+        assistantMsg.setRole("assistant");
+        assistantMsg.setContent(finalAnswer);
+        assistantMsg.setSortOrder(sortOrder);
+        assistantMsg.setSources("[]");
+        if (!agentResult.getCitations().isEmpty()) {
+            try {
+                assistantMsg.setCitationsJson(objectMapper.writeValueAsString(agentResult.getCitations()));
+            } catch (Exception jsonEx) {
+                log.warn("[AgentApplication] citations 序列化失败 | error={}", jsonEx.getMessage());
+            }
+        }
+        chatMessageDAO.insert(assistantMsg);
+    }
+
+    private List<String> loadRecentHistory(String sessionId, int turns) {
+        if (sessionId == null || chatMessageDAO == null) return List.of();
+        try {
+            List<ChatMessage> msgs = chatMessageDAO.listBySessionIdOrderBySortOrder(sessionId, turns * 2);
+            List<String> history = new ArrayList<>();
+            for (ChatMessage msg : msgs) {
+                if ("user".equals(msg.getRole())) {
+                    history.add("用户：" + msg.getContent());
+                } else if ("assistant".equals(msg.getRole())) {
+                    String content = msg.getContent();
+                    if (content != null && content.length() > 200) {
+                        content = content.substring(0, 200);
+                    }
+                    history.add("助手：" + content);
+                }
+            }
+            log.debug("[AgentApplication] 加载近期历史 | sessionId={} | size={}", sessionId, history.size());
+            return history;
+        } catch (Exception e) {
+            log.warn("[AgentApplication] 加载近期历史失败，降级为空 | error={}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private static final class EffectiveTools {
+        final List<String> knowledgeCodes;
+        final List<Long> datasourceIds;
+
+        EffectiveTools(List<String> knowledgeCodes, List<Long> datasourceIds) {
+            this.knowledgeCodes = knowledgeCodes;
+            this.datasourceIds = datasourceIds;
         }
     }
 }

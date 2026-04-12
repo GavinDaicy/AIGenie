@@ -3,7 +3,6 @@ package com.genie.query.domain.agent.sql;
 import com.genie.query.domain.agent.tool.sql.pipeline.SelfCorrectionLoop;
 import com.genie.query.domain.agent.tool.sql.pipeline.SqlGenerationService;
 import com.genie.query.domain.agent.tool.sql.pipeline.SqlSecurityValidator;
-import com.genie.query.domain.agent.tool.sql.pipeline.DynamicFewShotService;
 import com.genie.query.domain.agent.tool.sql.SqlExecutor;
 import com.genie.query.domain.agent.tool.sql.model.SqlQueryResult;
 import com.genie.query.domain.agent.tool.sql.model.SqlGenerationResult;
@@ -38,8 +37,6 @@ class SelfCorrectionLoopTest {
     @Mock private SqlGenerationService sqlGenerationService;
     @Mock private SqlSecurityValidator sqlSecurityValidator;
     @Mock private SqlExecutor sqlExecutor;
-    @Mock private DynamicFewShotService dynamicFewShotService;
-
     @InjectMocks
     private SelfCorrectionLoop loop;
 
@@ -64,7 +61,6 @@ class SelfCorrectionLoopTest {
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getQueryResult().rowCount()).isEqualTo(3);
         verify(sqlGenerationService, times(1)).generate(any(), any(), any(), any());
-        verify(dynamicFewShotService).saveSuccessfulPair(eq(QUESTION), any());
     }
 
     @Test
