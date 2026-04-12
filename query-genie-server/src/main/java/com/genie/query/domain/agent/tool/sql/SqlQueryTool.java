@@ -121,8 +121,8 @@ public class SqlQueryTool implements AgentTool {
         }
 
         // Step 2前：构建详细 Schema 上下文（含字段别名 + sample_values）
-        String schemaContext = schemaContextBuilder.buildSchemaContext(
-                linkedTables, linking.getColumns());
+        // LLM 仅用于识别相关表，Schema 包含命中表的全部字段，避免 LLM 列召回不全导致 SQL 生成失败
+        String schemaContext = schemaContextBuilder.buildSchemaContext(linkedTables);
 
         // Step 2前：动态 Few-shot 检索（迭代2暂返回空）
         String fewShot = dynamicFewShotService.retrieve(question, FEW_SHOT_TOP_K);
