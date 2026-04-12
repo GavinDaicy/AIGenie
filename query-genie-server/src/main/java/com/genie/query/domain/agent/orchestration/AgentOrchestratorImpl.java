@@ -165,165 +165,14 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                                List<String> knowledgeCodes, List<Long> datasourceIds,
                                AgentAskRequest.ToolForce toolForce,
                                PrintWriter writer) {
-
         AgentContext context = new AgentContext(sessionId, question, knowledgeCodes, datasourceIds, writer);
         log.info("[AgentOrchestrator] 开始执行 | sessionId={} | question={}", sessionId, question);
-        String finalAnswer = null;
         List<CitationItem> allCitations = new ArrayList<>();
         AgentResult result = AgentResult.of(null, allCitations);
-
         try {
-            // 中间件前置处理（历史注入、暂停上下文恢复、任务规划）
             middlewareChain.runBefore(context);
-
-            // 初始化工具 Callback（根据 toolForce 动态过滤被禁用的工具）
-            List<Object> toolList = buildToolList(toolForce, datasourceIds, knowledgeCodes);
-            ToolCallback[] toolCallbacks = ToolCallbacks.from(toolList.toArray());
-            Map<String, ToolCallback> callbackMap = Arrays.stream(toolCallbacks)
-                    .collect(Collectors.toMap(cb -> cb.getToolDefinition().name(), cb -> cb));
-
-            // 初始化消息历史（System Prompt）
-            String systemPrompt = buildSystemPrompt(datasourceIds, knowledgeCodes, toolForce);
-            context.addMessage(new SystemMessage(systemPrompt));
-
-            context.addMessage(new UserMessage(question));
-
-            // ReAct 主循环
-            for (int i = 1; i <= maxIterations; i++) {
-                context.incrementIteration();
-
-                // 检查是否需要上下文压缩
-                if (contextWindowManager.shouldCompress(context)) {
-                    stepEventPublisher.publish(writer, StepEvent.planning("上下文过长，正在压缩历史记录…"));
-                    contextWindowManager.compress(context, chatModel);
-                }
-
-                // 推送 THINKING 事件：告知前端 LLM 正在推理
-                stepEventPublisher.publish(writer, StepEvent.thinking(i));
-
-                // 调用 LLM（携带工具定义）— 流式输出，降级阻塞
-                Prompt prompt = new Prompt(context.getMessages(),
-                        ToolCallingChatOptions.builder()
-                                .toolCallbacks(Arrays.asList(toolCallbacks))
-                                .internalToolExecutionEnabled(false)
-                                .build());
-
-                AssistantMessage assistantMsg = streamLlmCall(prompt, writer, i, sessionId);
-
-                // 检查是否有工具调用
-                List<AssistantMessage.ToolCall> toolCalls = assistantMsg.getToolCalls();
-                if (toolCalls == null || toolCalls.isEmpty()) {
-                    // 无工具调用 → LLM 的回答即为最终答案
-                    log.info("[AgentOrchestrator] 无工具调用，输出最终答案 | iteration={}", i);
-                    String thought = assistantMsg.getText();
-                    finalAnswer = (thought == null || thought.isBlank()) ? "（无结果）" : thought;
-                    if (!allCitations.isEmpty()) {
-                        stepEventPublisher.publish(writer, StepEvent.citations(allCitations));
-                    }
-                    stepEventPublisher.publish(writer, StepEvent.finalAnswer(finalAnswer));
-                    persistStepAsync(sessionId, i, "FINAL_ANSWER", null, finalAnswer, 0);
-                    break;
-                }
-
-                // 将 Assistant 消息加入历史
-                context.addMessage(assistantMsg);
-
-                // 依次执行每个工具调用
-                List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
-                for (AssistantMessage.ToolCall toolCall : toolCalls) {
-                    String toolName = toolCall.name();
-                    String toolArgs = toolCall.arguments();
-
-                    // 推送 TOOL_CALL 事件
-                    StepEvent callEvent = StepEvent.toolCall(i, toolName, toolArgs);
-                    stepEventPublisher.publish(writer, callEvent);
-                    persistStepAsync(sessionId, i, "TOOL_CALL", toolName, toolArgs, 0);
-
-                    // askUser 工具：在调用 ToolCallback 之前直接拦截，从 JSON 参数中提取追问内容
-                    // 避免经过 ToolCallback.call() 导致的 JSON 二次编码问题
-                    if (AskUserTool.TOOL_NAME.equals(toolName)) {
-                        String askQuestion = extractAskUserQuestion(toolArgs);
-                        log.info("[AgentOrchestrator] 检测到 askUser 调用 | question={} | sessionId={}", askQuestion, sessionId);
-                        middlewareChain.runOnAskUserPause(context, buildToolResultsHint(context));
-                        stepEventPublisher.publish(writer, StepEvent.askUser(askQuestion));
-                        persistAskUserMessageAsync(sessionId, askQuestion);
-                        stepEventPublisher.sendDone(writer);
-                        result = AgentResult.paused();
-                        middlewareChain.runAfter(context, result);
-                        CitationRegistry.cleanup();
-                        return result; // 暂停 ReAct 循环，等待用户回复
-                    }
-
-                    // 执行工具
-                    long startMs = System.currentTimeMillis();
-                    String toolResult;
-                    try {
-                        ToolCallback callback = callbackMap.get(toolName);
-                        if (callback == null) {
-                            toolResult = "工具 [" + toolName + "] 未注册，无法执行";
-                        } else {
-                            toolResult = callback.call(toolArgs);
-                        }
-                    } catch (Exception e) {
-                        log.warn("[AgentOrchestrator] 工具执行异常 | tool={} | error={}", toolName, e.getMessage());
-                        toolResult = "工具执行失败: " + e.getMessage();
-                    }
-                    long durationMs = System.currentTimeMillis() - startMs;
-
-                    // 从 CitationRegistry 取出本次工具调用注册的引用，每条单独分配全局递增编号
-                    List<CitationItem> toolCitations = CitationRegistry.drainAndClear();
-                    Integer firstCitationIndex = null;
-                    if (!toolCitations.isEmpty()) {
-                        for (CitationItem c : toolCitations) {
-                            c.setIndex(CitationRegistry.nextIndex());
-                        }
-                        firstCitationIndex = toolCitations.get(0).getIndex();
-                        allCitations.addAll(toolCitations);
-                    }
-
-                    // 推送 TOOL_RESULT 事件（携带第一个 citationIndex，前端据此定位本次引用起点）
-                    StepEvent resultEvent = StepEvent.toolResult(i, toolName, toolResult, durationMs, firstCitationIndex);
-                    stepEventPublisher.publish(writer, resultEvent);
-                    persistStepAsync(sessionId, i, "TOOL_RESULT", toolName, toolResult, (int) durationMs);
-
-                    // 若有引用编号，将编号追加给 LLM，确保最终答案中 [N] 与引用数据一一对应
-                    String toolResultForLlm = toolResult;
-                    if (firstCitationIndex != null) {
-                        if (toolCitations.size() == 1) {
-                            toolResultForLlm = toolResult + "\n【引用编号：[" + firstCitationIndex
-                                    + "]，在最终答案引用此工具数据时请在句末标注 [" + firstCitationIndex + "]】";
-                        } else {
-                            StringBuilder idxHint = new StringBuilder();
-                            for (CitationItem c : toolCitations) {
-                                if (idxHint.length() > 0) idxHint.append(", ");
-                                idxHint.append("[").append(c.getIndex()).append("]");
-                            }
-                            toolResultForLlm = toolResult + "\n【引用编号：" + idxHint
-                                    + "，在最终答案引用此工具各条数据时请在句末标注对应编号】";
-                        }
-                    }
-
-                    context.incrementToolCallCount();
-                    toolResponses.add(new ToolResponseMessage.ToolResponse(
-                            toolCall.id(), toolName, toolResultForLlm));
-                }
-
-                // 将工具结果加入消息历史
-                context.addMessage(ToolResponseMessage.builder()
-                        .responses(toolResponses).build());
-
-                // 若已达最大迭代次数，强制结束
-                if (i == maxIterations) {
-                    log.warn("[AgentOrchestrator] 达到最大迭代次数 {}", maxIterations);
-                    String errMsg = "已达到最大推理轮次（" + maxIterations + "轮），请尝试更具体的问题描述。";
-                    stepEventPublisher.publish(writer, StepEvent.error(errMsg));
-                }
-            }
-
-            stepEventPublisher.sendDone(writer);
-
-            result = AgentResult.of(finalAnswer, allCitations);
-
+            ReActSetup setup = prepareReActContext(context, toolForce, datasourceIds, knowledgeCodes);
+            result = runReActLoop(context, setup, allCitations, writer, sessionId);
         } catch (Exception e) {
             log.error("[AgentOrchestrator] 执行异常 | sessionId={} | error={}", sessionId, e.getMessage(), e);
             stepEventPublisher.publish(writer, StepEvent.error("Agent执行异常: " + e.getMessage()));
@@ -333,6 +182,161 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             CitationRegistry.cleanup();
         }
         return result;
+    }
+
+    private ReActSetup prepareReActContext(AgentContext context, AgentAskRequest.ToolForce toolForce,
+                                           List<Long> datasourceIds, List<String> knowledgeCodes) {
+        List<Object> toolList = buildToolList(toolForce, datasourceIds, knowledgeCodes);
+        ToolCallback[] toolCallbacks = ToolCallbacks.from(toolList.toArray());
+        Map<String, ToolCallback> callbackMap = Arrays.stream(toolCallbacks)
+                .collect(Collectors.toMap(cb -> cb.getToolDefinition().name(), cb -> cb));
+        String systemPrompt = buildSystemPrompt(datasourceIds, knowledgeCodes, toolForce);
+        context.addMessage(new SystemMessage(systemPrompt));
+        context.addMessage(new UserMessage(context.getOriginalQuestion()));
+        return new ReActSetup(toolCallbacks, callbackMap);
+    }
+
+    private AgentResult runReActLoop(AgentContext context, ReActSetup setup,
+                                     List<CitationItem> allCitations,
+                                     PrintWriter writer, String sessionId) {
+        String finalAnswer = null;
+        for (int i = 1; i <= maxIterations; i++) {
+            context.incrementIteration();
+            compressContextIfNeeded(context, writer);
+            stepEventPublisher.publish(writer, StepEvent.thinking(i));
+
+            Prompt prompt = new Prompt(context.getMessages(),
+                    ToolCallingChatOptions.builder()
+                            .toolCallbacks(Arrays.asList(setup.toolCallbacks))
+                            .internalToolExecutionEnabled(false)
+                            .build());
+            AssistantMessage assistantMsg = streamLlmCall(prompt, writer, i, sessionId);
+
+            List<AssistantMessage.ToolCall> toolCalls = assistantMsg.getToolCalls();
+            if (toolCalls == null || toolCalls.isEmpty()) {
+                log.info("[AgentOrchestrator] 无工具调用，输出最终答案 | iteration={}", i);
+                String thought = assistantMsg.getText();
+                finalAnswer = (thought == null || thought.isBlank()) ? "（无结果）" : thought;
+                if (!allCitations.isEmpty()) {
+                    stepEventPublisher.publish(writer, StepEvent.citations(allCitations));
+                }
+                stepEventPublisher.publish(writer, StepEvent.finalAnswer(finalAnswer));
+                persistStepAsync(sessionId, i, "FINAL_ANSWER", null, finalAnswer, 0);
+                break;
+            }
+
+            context.addMessage(assistantMsg);
+
+            AgentResult pauseResult = executeToolCalls(
+                    toolCalls, setup.callbackMap, context, allCitations, writer, sessionId, i);
+            if (pauseResult != null) {
+                return pauseResult; // 暂停 ReAct 循环，等待用户回复
+            }
+
+            if (i == maxIterations) {
+                log.warn("[AgentOrchestrator] 达到最大迭代次数 {}", maxIterations);
+                stepEventPublisher.publish(writer, StepEvent.error(
+                        "已达到最大推理轮次（" + maxIterations + "轮），请尝试更具体的问题描述。"));
+            }
+        }
+        stepEventPublisher.sendDone(writer);
+        return AgentResult.of(finalAnswer, allCitations);
+    }
+
+    private void compressContextIfNeeded(AgentContext context, PrintWriter writer) {
+        if (contextWindowManager.shouldCompress(context)) {
+            stepEventPublisher.publish(writer, StepEvent.planning("上下文过长，正在压缩历史记录…"));
+            contextWindowManager.compress(context, chatModel);
+        }
+    }
+
+    private AgentResult executeToolCalls(List<AssistantMessage.ToolCall> toolCalls,
+                                         Map<String, ToolCallback> callbackMap,
+                                         AgentContext context, List<CitationItem> allCitations,
+                                         PrintWriter writer, String sessionId, int iteration) {
+        List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
+        for (AssistantMessage.ToolCall toolCall : toolCalls) {
+            String toolName = toolCall.name();
+            String toolArgs = toolCall.arguments();
+
+            stepEventPublisher.publish(writer, StepEvent.toolCall(iteration, toolName, toolArgs));
+            persistStepAsync(sessionId, iteration, "TOOL_CALL", toolName, toolArgs, 0);
+
+            // askUser 工具：直接拦截，避免经过 ToolCallback.call() 导致的 JSON 二次编码问题
+            if (AskUserTool.TOOL_NAME.equals(toolName)) {
+                handleAskUserPause(context, toolArgs, writer, sessionId);
+                return AgentResult.paused();
+            }
+
+            String toolResultForLlm = executeSingleTool(
+                    toolCall, callbackMap, allCitations, writer, sessionId, iteration);
+            context.incrementToolCallCount();
+            toolResponses.add(new ToolResponseMessage.ToolResponse(
+                    toolCall.id(), toolName, toolResultForLlm));
+        }
+        context.addMessage(ToolResponseMessage.builder().responses(toolResponses).build());
+        return null;
+    }
+
+    private void handleAskUserPause(AgentContext context, String toolArgs,
+                                    PrintWriter writer, String sessionId) {
+        String askQuestion = extractAskUserQuestion(toolArgs);
+        log.info("[AgentOrchestrator] 检测到 askUser 调用 | question={} | sessionId={}", askQuestion, sessionId);
+        middlewareChain.runOnAskUserPause(context, buildToolResultsHint(context));
+        stepEventPublisher.publish(writer, StepEvent.askUser(askQuestion));
+        persistAskUserMessageAsync(sessionId, askQuestion);
+        stepEventPublisher.sendDone(writer);
+    }
+
+    private String executeSingleTool(AssistantMessage.ToolCall toolCall,
+                                     Map<String, ToolCallback> callbackMap,
+                                     List<CitationItem> allCitations,
+                                     PrintWriter writer, String sessionId, int iteration) {
+        String toolName = toolCall.name();
+        String toolArgs = toolCall.arguments();
+
+        long startMs = System.currentTimeMillis();
+        String toolResult;
+        try {
+            ToolCallback callback = callbackMap.get(toolName);
+            toolResult = callback != null ? callback.call(toolArgs)
+                    : "工具 [" + toolName + "] 未注册，无法执行";
+        } catch (Exception e) {
+            log.warn("[AgentOrchestrator] 工具执行异常 | tool={} | error={}", toolName, e.getMessage());
+            toolResult = "工具执行失败: " + e.getMessage();
+        }
+        long durationMs = System.currentTimeMillis() - startMs;
+
+        List<CitationItem> toolCitations = CitationRegistry.drainAndClear();
+        Integer firstCitationIndex = null;
+        if (!toolCitations.isEmpty()) {
+            for (CitationItem c : toolCitations) {
+                c.setIndex(CitationRegistry.nextIndex());
+            }
+            firstCitationIndex = toolCitations.get(0).getIndex();
+            allCitations.addAll(toolCitations);
+        }
+
+        stepEventPublisher.publish(writer,
+                StepEvent.toolResult(iteration, toolName, toolResult, durationMs, firstCitationIndex));
+        persistStepAsync(sessionId, iteration, "TOOL_RESULT", toolName, toolResult, (int) durationMs);
+        return appendCitationHint(toolResult, toolCitations, firstCitationIndex);
+    }
+
+    private String appendCitationHint(String toolResult, List<CitationItem> toolCitations,
+                                      Integer firstCitationIndex) {
+        if (firstCitationIndex == null) return toolResult;
+        if (toolCitations.size() == 1) {
+            return toolResult + "\n【引用编号：[" + firstCitationIndex
+                    + "]，在最终答案引用此工具数据时请在句末标注 [" + firstCitationIndex + "]】";
+        }
+        StringBuilder idxHint = new StringBuilder();
+        for (CitationItem c : toolCitations) {
+            if (idxHint.length() > 0) idxHint.append(", ");
+            idxHint.append("[").append(c.getIndex()).append("]");
+        }
+        return toolResult + "\n【引用编号：" + idxHint
+                + "，在最终答案引用此工具各条数据时请在句末标注对应编号】";
     }
 
     /**
@@ -589,5 +593,15 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             log.warn("[AgentOrchestrator] 解析 askUser 参数失败，使用原始值 | args={} | error={}", toolArgsJson, e.getMessage());
         }
         return toolArgsJson;
+    }
+
+    private static final class ReActSetup {
+        final ToolCallback[] toolCallbacks;
+        final Map<String, ToolCallback> callbackMap;
+
+        ReActSetup(ToolCallback[] toolCallbacks, Map<String, ToolCallback> callbackMap) {
+            this.toolCallbacks = toolCallbacks;
+            this.callbackMap = callbackMap;
+        }
     }
 }
