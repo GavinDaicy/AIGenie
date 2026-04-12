@@ -124,7 +124,7 @@ public class SqlQueryTool implements AgentTool {
         // LLM 仅用于识别相关表，Schema 包含命中表的全部字段，避免 LLM 列召回不全导致 SQL 生成失败
         String schemaContext = schemaContextBuilder.buildSchemaContext(linkedTables);
 
-        // Step 2前：动态 Few-shot 检索（迭代2暂返回空）
+        // Step 2前：动态 Few-shot 检索（ES kNN 向量检索，未启用时返回空字符串）
         String fewShot = dynamicFewShotService.retrieve(question, FEW_SHOT_TOP_K);
 
         // 白名单：只允许已注册表

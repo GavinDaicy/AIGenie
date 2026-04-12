@@ -22,4 +22,6 @@ public interface ChatMessageMapper {
     int countBySessionId(String sessionId);
 
     void deleteBySessionId(String sessionId);
+
+    ChatMessage findById(@Param("id") String id);
 }

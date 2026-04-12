@@ -11,7 +11,9 @@ import com.genie.query.domain.agent.event.StepEventPublisher;
 import com.genie.query.domain.chat.dao.ChatMessageDAO;
 import com.genie.query.domain.chat.model.ChatMessage;
 
+import com.genie.query.domain.agent.PendingMessageIdHolder;
 import com.genie.query.domain.agent.routing.RecentHistoryHolder;
+import com.genie.query.infrastructure.util.snowflake.SnowflakeIdUtils;
 import org.apache.commons.collections4.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,6 +79,8 @@ public class AgentApplication {
 
         List<String> recentHistory = loadRecentHistory(sessionId, 2);
         RecentHistoryHolder.set(recentHistory);
+        String pendingMessageId = SnowflakeIdUtils.getNextStringId();
+        PendingMessageIdHolder.set(pendingMessageId);
         try {
             QuestionType questionType = routeQuestion(question, recentHistory, writer);
             EffectiveTools tools = resolveEffectiveTools(questionType, datasourceIds, knowledgeCodes, toolForce);
@@ -84,6 +88,7 @@ public class AgentApplication {
             persistConversation(sessionId, question, agentResult);
         } finally {
             RecentHistoryHolder.clear();
+            PendingMessageIdHolder.clear();
         }
     }
 
@@ -178,6 +183,10 @@ public class AgentApplication {
     private void persistAssistantMessage(String sessionId, String finalAnswer,
                                          AgentResult agentResult, int sortOrder) {
         ChatMessage assistantMsg = new ChatMessage();
+        String messageId = PendingMessageIdHolder.get();
+        if (messageId != null) {
+            assistantMsg.setId(messageId);
+        }
         assistantMsg.setSessionId(sessionId);
         assistantMsg.setRole("assistant");
         assistantMsg.setContent(finalAnswer);

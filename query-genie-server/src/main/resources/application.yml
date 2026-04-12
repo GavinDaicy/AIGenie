@@ -72,6 +72,13 @@ app:
       oriosearch:
         base-url: ${ORIOSEARCH_BASE_URL:http://localhost:8000}
 
+  # FewShot ES 向量库（点赞驱动写入，kNN 检索相似历史 Q→SQL 对）
+  fewshot:
+    es:
+      enabled: ${APP_FEWSHOT_ES_ENABLED:true}      # 默认关闭，待 ES 向量能力就绪后开启
+      index-name: ${APP_FEWSHOT_ES_INDEX:fewshot_qsql_pairs}
+      top-k: ${APP_FEWSHOT_ES_TOP_K:3}              # kNN 召回 Top-K 条案例
+
   # Query 改写与多查询生成
   query-rewrite:
     enabled: true                  # 是否默认启用 Query 改写

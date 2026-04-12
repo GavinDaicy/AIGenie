@@ -42,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import com.genie.query.controller.dto.AgentAskRequest;
+import com.genie.query.domain.agent.PendingMessageIdHolder;
 
 /**
  * Agent 编排引擎实现：基于 Spring AI Tool Calling 驱动 ReAct 循环。
@@ -235,7 +236,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 if (!allCitations.isEmpty()) {
                     stepEventPublisher.publish(writer, StepEvent.citations(allCitations));
                 }
-                stepEventPublisher.publish(writer, StepEvent.finalAnswer(finalAnswer));
+                stepEventPublisher.publish(writer, StepEvent.finalAnswer(finalAnswer, PendingMessageIdHolder.get()));
                 persistStepAsync(sessionId, i, "FINAL_ANSWER", null, finalAnswer, 0);
                 break;
             }

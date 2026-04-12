@@ -21,4 +21,8 @@
     <delete id="deleteBySessionId">
         delete from chat_message where session_id = #{sessionId}
     </delete>
+
+    <select id="findById" resultType="com.genie.query.domain.chat.model.ChatMessage">
+        SELECT * FROM chat_message WHERE id = #{id} LIMIT 1
+    </select>
 </mapper>

@@ -52,4 +52,9 @@ public class ChatMessageDaoImpl implements ChatMessageDAO {
     public void deleteBySessionId(String sessionId) {
         chatMessageMapper.deleteBySessionId(sessionId);
     }
+
+    @Override
+    public ChatMessage findById(String id) {
+        return chatMessageMapper.findById(id);
+    }
 }

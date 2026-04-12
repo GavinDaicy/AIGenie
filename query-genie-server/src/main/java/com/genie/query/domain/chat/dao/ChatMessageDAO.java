@@ -19,4 +19,6 @@ public interface ChatMessageDAO {
     int countBySessionId(String sessionId);
 
     void deleteBySessionId(String sessionId);
+
+    ChatMessage findById(String id);
 }

@@ -206,6 +206,36 @@
                 />
                 <span v-if="msg.streaming" class="cursor-blink">|</span>
               </div>
+
+              <!-- 点赞/踩反馈栏 -->
+              <div v-if="msg.role === 'assistant' && !msg.loading && msg.messageId" class="feedback-bar">
+                <span class="fb-hint">回答是否有帮助？</span>
+                <button
+                  class="fb-icon-btn"
+                  :class="{ 'fb-liked': feedbackStatus[msg.messageId] === 1 }"
+                  :disabled="feedbackStatus[msg.messageId] != null"
+                  @click="handleFeedback(msg, 1)"
+                  title="有帮助"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+                    <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                  </svg>
+                </button>
+                <button
+                  class="fb-icon-btn"
+                  :class="{ 'fb-disliked': feedbackStatus[msg.messageId] === -1 }"
+                  :disabled="feedbackStatus[msg.messageId] != null"
+                  @click="handleFeedback(msg, -1)"
+                  title="没帮助"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                    <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                  </svg>
+                </button>
+                <span v-if="feedbackStatus[msg.messageId] != null" class="fb-thanks">感谢反馈</span>
+              </div>
             </div>
             <div v-if="msg.role === 'user'" class="avatar avatar-me">我</div>
           </div>
@@ -305,7 +335,7 @@
 </template>
 
 <script>
-import { agentAskStream } from '@/api/agent'
+import { agentAskStream, submitFeedback } from '@/api/agent'
 import { getKnowledgeList } from '@/api/knowledge'
 import { listDatasources } from '@/api/schema'
 import { createSession, listSessions, getSession, deleteSession } from '@/api/session'
@@ -344,6 +374,7 @@ export default {
       abortFn: null,
       citationDrawerVisible: false,
       activeCitation: null,
+      feedbackStatus: {},
       toolForce: {
         webSearch: null,
         knowledge: null,
@@ -489,6 +520,7 @@ export default {
         id: assistantId,
         role: 'assistant',
         content: '',
+        messageId: null,
         steps: [],
         stepsExpanded: ['steps'],
         loading: true,
@@ -519,11 +551,11 @@ export default {
           if (event.type === 'CITATIONS') {
             msg.citations = event.citations || []
           } else if (event.type === 'FINAL_ANSWER') {
-            // 最终答案：将正在流式输出的 THOUGHT 标记为完成
+            // 最终答案元信息（内容由 onChunk 负责 append，此处只更新状态和 messageId）
             msg.steps.forEach(s => { if (s._streaming) s._streaming = false })
             msg.loading = false
             msg.streaming = true
-            this.typewriterAppend(msg, event.content || '')
+            if (event.messageId) msg.messageId = event.messageId
           } else if (event.type === 'ASK_USER') {
             // 追问事件：显示追问气泡，暂停等待用户回复
             msg.steps.forEach(s => { if (s._streaming) s._streaming = false })
@@ -653,6 +685,15 @@ export default {
       if (questionType === 'DATA_QUERY') return 'warning'
       if (questionType === 'KNOWLEDGE') return 'success'
       return 'info'
+    },
+    async handleFeedback(msg, rating) {
+      if (!msg.messageId || this.feedbackStatus[msg.messageId] != null) return
+      try {
+        await submitFeedback(msg.messageId, this.currentSessionId, rating)
+        this.$set(this.feedbackStatus, msg.messageId, rating)
+      } catch (_) {
+        this.$message.error('反馈提交失败，请重试')
+      }
     }
   }
 }
@@ -1102,6 +1143,60 @@ export default {
   margin-left: 1px;
 }
 .empty-answer { color: var(--qg-text-secondary); font-style: italic; }
+
+/* 点赞/踩反馈栏 — 扁平化风格 */
+.feedback-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--qg-border-subtle);
+}
+.fb-hint {
+  font-size: 12px;
+  color: var(--qg-text-secondary);
+  margin-right: 6px;
+  user-select: none;
+}
+.fb-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--qg-text-secondary);
+  transition: background 0.15s, color 0.15s;
+  svg {
+    width: 15px;
+    height: 15px;
+    display: block;
+  }
+  &:hover:not(:disabled) {
+    background: var(--qg-bg-card-soft, #f3f4f6);
+    color: var(--qg-text-primary);
+  }
+  &:disabled { cursor: default; }
+  &.fb-liked {
+    color: #059669;
+    background: #d1fae5;
+  }
+  &.fb-disliked {
+    color: #dc2626;
+    background: #fee2e2;
+  }
+}
+.fb-thanks {
+  font-size: 11px;
+  color: var(--qg-text-secondary);
+  margin-left: 6px;
+  user-select: none;
+}
 
 /* Fix2: 最终答案来源角标 */
 .answer-sources {
